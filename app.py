@@ -27,6 +27,10 @@ from PySide6.QtGui import QFont
 # Plotting imports
 import pyqtgraph as pg
 
+# Set PyQtGraph to use light theme
+pg.setConfigOption('background', 'w')  # White background
+pg.setConfigOption('foreground', 'k')  # Black foreground
+
 # Import our existing modules
 import config
 from rv_controller import MultiBandEqualizer, RandomVibrationController, create_bandpass_filter, make_bandlimited_noise, apply_safety_limiters
