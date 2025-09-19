@@ -733,22 +733,11 @@ class MainWindow(QMainWindow):
         self.tab_widget.addTab(self.controller_tab, "Controller")
         self.tab_widget.addTab(self.realtime_tab, "Real-Time Data")
         
-        # Controller worker thread
-        self.controller_thread = QThread()
-        self.controller_worker = ControllerWorker(self.shared_config)
-        self.controller_worker.moveToThread(self.controller_thread)
+        # Initialize thread objects (will be created fresh on each start)
+        self.controller_thread = None
+        self.controller_worker = None
         
-        # Connect signals
-        self.controller_worker.psd_data_ready.connect(
-            lambda data: self.controller_tab.update_plots(psd_data=data))
-        self.controller_worker.metrics_data_ready.connect(
-            lambda data: self.controller_tab.update_plots(metrics_data=data))
-        self.controller_worker.eq_data_ready.connect(
-            lambda data: self.controller_tab.update_plots(eq_data=data))
-        self.controller_worker.realtime_data_ready.connect(
-            self.realtime_tab.add_data_point)
-        
-        # Connect controller tab buttons to worker thread
+        # Connect controller tab buttons to start/stop methods
         self.controller_tab.start_button.clicked.connect(self.start_controller)
         self.controller_tab.stop_button.clicked.connect(self.stop_controller)
     
@@ -769,9 +758,28 @@ class MainWindow(QMainWindow):
     
     def start_controller(self):
         """Start the controller in a separate thread"""
-        if not self.controller_worker.is_running:
+        if self.controller_worker is None or not self.controller_worker.is_running:
+            # Create new thread each time (Qt requirement)
+            self.controller_thread = QThread()
+            self.controller_worker = ControllerWorker(self.shared_config)
+            self.controller_worker.moveToThread(self.controller_thread)
+            
+            # Reconnect signals for new worker
+            self.controller_worker.psd_data_ready.connect(
+                lambda data: self.controller_tab.update_plots(psd_data=data))
+            self.controller_worker.metrics_data_ready.connect(
+                lambda data: self.controller_tab.update_plots(metrics_data=data))
+            self.controller_worker.eq_data_ready.connect(
+                lambda data: self.controller_tab.update_plots(eq_data=data))
+            self.controller_worker.realtime_data_ready.connect(
+                self.realtime_tab.add_data_point)
+            
+            # Connect thread start to worker
             self.controller_thread.started.connect(self.controller_worker.run_controller)
+            
+            # Start thread
             self.controller_thread.start()
+            
             # Update controller tab UI
             self.controller_tab.start_controller()
             # Also start real-time data viewer
@@ -779,8 +787,14 @@ class MainWindow(QMainWindow):
     
     def stop_controller(self):
         """Stop the controller"""
-        if self.controller_worker.is_running:
+        if hasattr(self, 'controller_worker') and self.controller_worker.is_running:
             self.controller_worker.stop()
+            
+            # Wait for thread to finish
+            if hasattr(self, 'controller_thread'):
+                self.controller_thread.quit()
+                self.controller_thread.wait(2000)  # Wait up to 2 seconds
+            
             # Update controller tab UI
             self.controller_tab.stop_controller()
             # Also stop real-time data viewer
@@ -789,10 +803,11 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         """Handle application close"""
         # Stop controller worker
-        if self.controller_worker.is_running:
+        if self.controller_worker and self.controller_worker.is_running:
             self.controller_worker.stop()
-            self.controller_thread.quit()
-            self.controller_thread.wait(3000)  # Wait up to 3 seconds
+            if self.controller_thread:
+                self.controller_thread.quit()
+                self.controller_thread.wait(3000)  # Wait up to 3 seconds
         
         event.accept()
 
