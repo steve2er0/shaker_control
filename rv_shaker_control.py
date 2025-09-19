@@ -5,11 +5,11 @@ from collections import deque
 
 # Conditional import of DAQ modules (only needed for hardware mode)
 try:
-    import nidaqmx
-    from nidaqmx.constants import (AcquisitionType, TerminalConfiguration, ExcitationSource,
-                                   AccelUnits, Coupling, VoltageUnits)
-    from nidaqmx.stream_writers import AnalogSingleChannelWriter
-    from nidaqmx.stream_readers import AnalogSingleChannelReader
+import nidaqmx
+from nidaqmx.constants import (AcquisitionType, TerminalConfiguration, ExcitationSource,
+                               AccelUnits, Coupling, VoltageUnits)
+from nidaqmx.stream_writers import AnalogSingleChannelWriter
+from nidaqmx.stream_readers import AnalogSingleChannelReader
     NIDAQMX_AVAILABLE = True
 except ImportError:
     print("Warning: nidaqmx not available - simulation mode only")
@@ -601,7 +601,7 @@ class LivePSDPlotter:
             if len(valid_psd) > 0:
                 y_min = max(1e-8, np.min(valid_psd) * 0.1)
                 y_max = np.max(valid_psd) * 10.0
-                if y_max > y_min:
+            if y_max > y_min:
                     self.ax_psd.set_ylim([y_min, y_max])
             else:
                 # Default range when no valid data - use target PSD range
@@ -646,10 +646,10 @@ class LivePSDPlotter:
                           max(self.level_hist), max(self.sat_hist), 
                           max(self.cf_hist) if self.cf_hist else 1.0,
                           max(self.plant_gain_hist) if self.plant_gain_hist else 1.0, 1.0)
-                if ymax <= ymin:
-                    ymax = ymin + 1.0
-                self.ax_dash.set_xlim([max(0, self._tick - self.Ndash), self._tick])
-                self.ax_dash.set_ylim([ymin, ymax])
+            if ymax <= ymin:
+                ymax = ymin + 1.0
+            self.ax_dash.set_xlim([max(0, self._tick - self.Ndash), self._tick])
+            self.ax_dash.set_ylim([ymin, ymax])
             else:
                 # Initial scaling for empty data
                 self.ax_dash.set_xlim([0, 50])
@@ -858,57 +858,57 @@ if SIMULATION_MODE:
     
 else:
     print("=== HARDWARE MODE ===")
-    ai_task = nidaqmx.Task()
-    ao_task = nidaqmx.Task()
+ai_task = nidaqmx.Task()
+ao_task = nidaqmx.Task()
 
 try:
     if not SIMULATION_MODE:
-        # AI accelerometer channel in g
-        ai_ch = ai_task.ai_channels.create_ai_accel_chan(
-            physical_channel=device_ai,
-            name_to_assign_to_channel="accel",
-            sensitivity=accel_mV_per_g/1000.0, # V/g
-            sensitivity_units=nidaqmx.constants.AccelSensitivityUnits.MVOLTS_PER_G,
-            units=AccelUnits.G
-        )
-        ai_ch.ai_coupling = Coupling.AC
-        ai_ch.ai_excit_src = ExcitationSource.INTERNAL
-        ai_ch.ai_excit_val = 0.004  # 4 mA typical IEPE current; check your sensor spec
-        ai_ch.ai_term_cfg = TerminalConfiguration.DIFF
+    # AI accelerometer channel in g
+    ai_ch = ai_task.ai_channels.create_ai_accel_chan(
+        physical_channel=device_ai,
+        name_to_assign_to_channel="accel",
+        sensitivity=accel_mV_per_g/1000.0, # V/g
+        sensitivity_units=nidaqmx.constants.AccelSensitivityUnits.MVOLTS_PER_G,
+        units=AccelUnits.G
+    )
+    ai_ch.ai_coupling = Coupling.AC
+    ai_ch.ai_excit_src = ExcitationSource.INTERNAL
+    ai_ch.ai_excit_val = 0.004  # 4 mA typical IEPE current; check your sensor spec
+    ai_ch.ai_term_cfg = TerminalConfiguration.DIFF
 
-        # AI timing
-        ai_task.timing.cfg_samp_clk_timing(
-            rate=fs,
-            sample_mode=AcquisitionType.CONTINUOUS,
-            samps_per_chan=buf_samples
-        )
+    # AI timing
+    ai_task.timing.cfg_samp_clk_timing(
+        rate=fs,
+        sample_mode=AcquisitionType.CONTINUOUS,
+        samps_per_chan=buf_samples
+    )
 
-        # AO voltage
-        ao_task.ao_channels.create_ao_voltage_chan(
-            physical_channel=device_ao,
-            name_to_assign_to_channel="drive",
-            min_val=-ao_volt_limit, max_val=ao_volt_limit, units=VoltageUnits.VOLTS
-        )
-        ao_task.timing.cfg_samp_clk_timing(
-            rate=fs,
-            sample_mode=AcquisitionType.CONTINUOUS,
-            samps_per_chan=buf_samples
-        )
+    # AO voltage
+    ao_task.ao_channels.create_ao_voltage_chan(
+        physical_channel=device_ao,
+        name_to_assign_to_channel="drive",
+        min_val=-ao_volt_limit, max_val=ao_volt_limit, units=VoltageUnits.VOLTS
+    )
+    ao_task.timing.cfg_samp_clk_timing(
+        rate=fs,
+        sample_mode=AcquisitionType.CONTINUOUS,
+        samps_per_chan=buf_samples
+    )
 
-        # Share clocks and start triggers so AI/AO are synchronized
-        ao_task.timing.samp_clk_src = ai_task.timing.samp_clk_term
-        ao_task.triggers.start_trigger.cfg_dig_edge_start_trig(ai_task.triggers.start_trigger.term)
+    # Share clocks and start triggers so AI/AO are synchronized
+    ao_task.timing.samp_clk_src = ai_task.timing.samp_clk_term
+    ao_task.triggers.start_trigger.cfg_dig_edge_start_trig(ai_task.triggers.start_trigger.term)
 
-        # Stream objects
-        ai_reader = AnalogSingleChannelReader(ai_task.in_stream)
-        ao_writer = AnalogSingleChannelWriter(ao_task.out_stream, auto_start=False)
+    # Stream objects
+    ai_reader = AnalogSingleChannelReader(ai_task.in_stream)
+    ao_writer = AnalogSingleChannelWriter(ao_task.out_stream, auto_start=False)
 
-        # Prime AO buffer with zeros
-        ao_writer.write_many_sample(np.zeros(buf_samples))
+    # Prime AO buffer with zeros
+    ao_writer.write_many_sample(np.zeros(buf_samples))
 
-        # Start tasks (AI first so trigger is armed), then AO
-        ai_task.start()
-        ao_task.start()
+    # Start tasks (AI first so trigger is armed), then AO
+    ai_task.start()
+    ao_task.start()
         
         print("Hardware DAQ setup complete")
 
@@ -925,7 +925,7 @@ try:
         plant_gain_g_per_V = sim_plant_gain * 0.8  # Start close to actual for faster convergence
         print(f"Starting with plant gain estimate: {plant_gain_g_per_V:.2f} g/V (actual: {sim_plant_gain:.2f} g/V)")
     else:
-        plant_gain_g_per_V = 1.0  # initial conservative guess
+    plant_gain_g_per_V = 1.0  # initial conservative guess
         print("Starting with conservative plant gain estimate: 1.0 g/V")
 
     mode_str = "SIMULATION" if SIMULATION_MODE else "HARDWARE"
