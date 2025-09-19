@@ -387,6 +387,31 @@ class ControllerTab(QWidget):
                 valid_target = ~np.isnan(psd_target)
                 if np.any(valid_target):
                     self.psd_target_curve.setData(f[valid_target], psd_target[valid_target])
+            
+            # Apply dashboard.py axis limits logic
+            # X limits based on frequency band
+            f1 = self.shared_config.target_psd_points[0][0]
+            f2 = self.shared_config.target_psd_points[-1][0]
+            xmin = max(0.8, f1 * 0.8)
+            xmax = max(f2 * 1.2, f1 * 2.0)
+            self.psd_plot.setXRange(xmin, xmax)
+            
+            # Y limits: adapt based on measured PSD inside band
+            band = (f >= f1) & (f <= f2)
+            if np.any(band):
+                valid_psd = psd_measured[band]
+                valid_psd = valid_psd[~np.isnan(valid_psd)]
+                if len(valid_psd) > 0:
+                    y_min = max(1e-8, np.min(valid_psd) * 0.1)
+                    y_max = np.max(valid_psd) * 10.0
+                    if y_max > y_min:
+                        self.psd_plot.setYRange(y_min, y_max)
+                else:
+                    # Default range when no valid data - use target PSD range
+                    target_range = [p[1] for p in self.shared_config.target_psd_points]
+                    y_min = min(target_range) * 0.1
+                    y_max = max(target_range) * 10.0
+                    self.psd_plot.setYRange(y_min, y_max)
         
         # Update metrics plot
         if metrics_data:
