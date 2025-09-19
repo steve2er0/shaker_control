@@ -317,12 +317,18 @@ class ControllerTab(QWidget):
         # Create plot widget
         self.plot_widget = pg.GraphicsLayoutWidget()
         
-        # PSD plot
+        # PSD plot with linear axes
         self.psd_plot = self.plot_widget.addPlot(title="Power Spectral Density")
-        self.psd_plot.setLogMode(x=True, y=True)
+        self.psd_plot.setLogMode(x=False, y=True)
         self.psd_plot.setLabel('left', 'PSD [g²/Hz]')
         self.psd_plot.setLabel('bottom', 'Frequency [Hz]')
         self.psd_plot.showGrid(x=True, y=True)
+        # Lock PSD x-axis to 20–2000 Hz and prevent x auto-ranging
+        self.psd_plot.setXRange(20.0, 2000.0, padding=0)
+        vb_psd = self.psd_plot.getViewBox()
+        vb_psd.setLimits(xMin=20.0, xMax=2000.0)
+        vb_psd.setAutoVisible(x=False, y=True)
+        self.psd_plot.enableAutoRange(x=False, y=True)
         
         # PSD curves
         self.psd_measured_curve = self.psd_plot.plot(pen='b', name='Measured PSD')
@@ -351,13 +357,13 @@ class ControllerTab(QWidget):
         
         # Equalizer plot
         self.eq_plot = self.plot_widget.addPlot(title="Equalizer Gains")
-        self.eq_plot.setLogMode(x=True, y=False)
+        self.eq_plot.setLogMode(x=False, y=False)
         self.eq_plot.setLabel('left', 'Gain')
         self.eq_plot.setLabel('bottom', 'Frequency [Hz]')
         self.eq_plot.showGrid(x=True, y=True)
         self.eq_plot.setYRange(0.1, 10.0)
 
-        # HARD LOCK the visible x-range to 20–2000 Hz (log-safe)
+        # HARD LOCK the visible x-range to 20–2000 Hz
         self.eq_xmin, self.eq_xmax = 20.0, 2000.0
         self.eq_plot.setXRange(self.eq_xmin, self.eq_xmax, padding=0)
         vb = self.eq_plot.getViewBox()
@@ -391,16 +397,45 @@ class ControllerTab(QWidget):
         if psd_data:
             if len(psd_data) == 4:  # New format with averaged PSD
                 f, psd_measured, psd_target, psd_averaged = psd_data
-                self.psd_measured_curve.setData(f, psd_measured)
-                self.psd_averaged_curve.setData(f, psd_averaged)
             else:  # Legacy format without averaged PSD
                 f, psd_measured, psd_target = psd_data
-                self.psd_measured_curve.setData(f, psd_measured)
-            
-            if psd_target is not None:
-                valid_target = ~np.isnan(psd_target)
+                psd_averaged = None
+
+            # Sanitize frequency axis for log scale: finite and > 0
+            f = np.asarray(f, dtype=float)
+            mask_base = np.isfinite(f) & (f > 0)
+
+            # Clip to display band [20, 2000] Hz
+            f = f[mask_base]
+            if f.size == 0:
+                return
+            band_mask = (f >= 20.0) & (f <= 2000.0)
+
+            # Apply masks to arrays with matching length
+            def _apply_mask(arr, mask):
+                arr = np.asarray(arr)
+                if arr.shape == f.shape:
+                    return arr[mask]
+                return arr
+
+            f_plot = f[band_mask]
+            psd_measured_plot = _apply_mask(psd_measured[mask_base], band_mask)
+            psd_target_plot   = _apply_mask(psd_target[mask_base] if psd_target is not None else None, band_mask) if psd_target is not None else None
+            psd_avg_plot      = _apply_mask(psd_averaged[mask_base], band_mask) if psd_averaged is not None else None
+
+            # For log-y plots, only plot positive finite PSD values
+            valid_meas = np.isfinite(psd_measured_plot) & (psd_measured_plot > 0)
+            self.psd_measured_curve.setData(f_plot[valid_meas], psd_measured_plot[valid_meas])
+            if psd_avg_plot is not None:
+                valid_avg = np.isfinite(psd_avg_plot) & (psd_avg_plot > 0)
+                self.psd_averaged_curve.setData(f_plot[valid_avg], psd_avg_plot[valid_avg])
+            if psd_target_plot is not None:
+                valid_target = np.isfinite(psd_target_plot) & (psd_target_plot > 0)
                 if np.any(valid_target):
-                    self.psd_target_curve.setData(f[valid_target], psd_target[valid_target])
+                    self.psd_target_curve.setData(f_plot[valid_target], psd_target_plot[valid_target])
+
+            # Re-enforce fixed x-range after updates
+            self.psd_plot.setXRange(20.0, 2000.0, padding=0)
         
         # Update metrics plot
         if metrics_data:
@@ -557,6 +592,10 @@ class RealTimeDataTab(QWidget):
         
         current_time = time.time() - self.start_time
         
+        # Debug logging for data reception
+        if len(self.streaming_data) % 100 == 0:  # Every 100 data points
+            print(f"Debug: Received data point at {current_time:.1f}s, value={acceleration_value:.4f}")
+        
         # Add new data
         self.streaming_time.append(current_time)
         self.streaming_data.append(acceleration_value)
@@ -573,6 +612,10 @@ class RealTimeDataTab(QWidget):
         """Update the streaming plot display"""
         if not self.is_streaming or not self.streaming_time:
             return
+        
+        # Debug logging for plot updates
+        if len(self.streaming_data) % 200 == 0:  # Every 200 data points
+            print(f"Debug: Updating streaming plot with {len(self.streaming_data)} points")
         
         # Update time domain plot
         self.realtime_curve.setData(list(self.streaming_time), list(self.streaming_data))
@@ -630,6 +673,7 @@ class ControllerWorker(QObject):
         """Main controller loop running in separate thread"""
         try:
             self.is_running = True
+            self.start_time = time.time()
             self.status_message.emit("Initializing controller...")
             
             # Initialize system based on current config
@@ -675,7 +719,15 @@ class ControllerWorker(QObject):
             level_fraction = self.shared_config.initial_level_fraction
             plant_gain_g_per_V = self.shared_config.sim_plant_gain * 0.8
             
+            loop_count = 0
             while not self.should_stop.is_set():
+                loop_count += 1
+                current_time = time.time() - self.start_time
+                
+                # Debug logging every 10 seconds
+                if loop_count % 100 == 0:  # ~10 seconds at 0.1s sleep
+                    print(f"Debug: Control loop running at {current_time:.1f}s, loop {loop_count}")
+                
                 # Generate drive signal
                 drive = make_bandlimited_noise(block_samples, bp, equalizer)
                 if np.std(drive) > 1e-12:
@@ -708,6 +760,7 @@ class ControllerWorker(QObject):
                 # Estimate PSD
                 f, Pxx, metrics = controller.estimate_psd(data)
                 if metrics is None:
+                    print(f"Debug: PSD estimation returned None at {time.time() - self.start_time:.1f}s")
                     continue
                 
                 S_avg_meas, S_avg_target, a_rms_meas = metrics
@@ -747,10 +800,17 @@ class ControllerWorker(QObject):
                 # Emit real-time data point (use RMS of current block)
                 self.realtime_data_ready.emit(np.std(data))
                 
+                # Debug logging for data emission
+                if loop_count % 50 == 0:  # Every ~5 seconds
+                    print(f"Debug: Emitting data at {current_time:.1f}s, RMS={np.std(data):.4f}")
+                
                 # Small delay to prevent overwhelming the GUI
                 time.sleep(0.1)
                 
         except Exception as e:
+            print(f"Debug: Exception in control loop at {time.time() - self.start_time:.1f}s: {e}")
+            import traceback
+            traceback.print_exc()
             self.status_message.emit(f"Error: {e}")
         finally:
             self.is_running = False
@@ -804,6 +864,18 @@ class MainWindow(QMainWindow):
         self.tab_widget = QTabWidget()
         layout.addWidget(self.tab_widget)
     
+    def handle_psd_data(self, data):
+        """Handle PSD data from controller worker"""
+        self.controller_tab.update_plots(psd_data=data)
+    
+    def handle_metrics_data(self, data):
+        """Handle metrics data from controller worker"""
+        self.controller_tab.update_plots(metrics_data=data)
+    
+    def handle_eq_data(self, data):
+        """Handle equalizer data from controller worker"""
+        self.controller_tab.update_plots(eq_data=data)
+    
     def start_controller(self):
         """Start the controller in a separate thread"""
         if self.controller_worker is None or not self.controller_worker.is_running:
@@ -813,12 +885,9 @@ class MainWindow(QMainWindow):
             self.controller_worker.moveToThread(self.controller_thread)
             
             # Reconnect signals for new worker
-            self.controller_worker.psd_data_ready.connect(
-                lambda data: self.controller_tab.update_plots(psd_data=data))
-            self.controller_worker.metrics_data_ready.connect(
-                lambda data: self.controller_tab.update_plots(metrics_data=data))
-            self.controller_worker.eq_data_ready.connect(
-                lambda data: self.controller_tab.update_plots(eq_data=data))
+            self.controller_worker.psd_data_ready.connect(self.handle_psd_data)
+            self.controller_worker.metrics_data_ready.connect(self.handle_metrics_data)
+            self.controller_worker.eq_data_ready.connect(self.handle_eq_data)
             self.controller_worker.realtime_data_ready.connect(
                 self.realtime_tab.add_data_point)
             
