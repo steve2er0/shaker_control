@@ -326,8 +326,14 @@ class ControllerTab(QWidget):
         self.psd_plot.setXRange(np.log10(10), np.log10(2500))  # 10 to 2500 Hz
         
         # Set axis formatting: X-axis normal, Y-axis scientific notation
-        self.psd_plot.getAxis('bottom').enableAutoSIPrefix(False)  # Disable scientific notation on X
-        self.psd_plot.getAxis('left').enableAutoSIPrefix(True)   # Enable scientific notation on Y
+        # For log mode plots, we need to configure the axis formatting differently
+        self.psd_plot.getAxis('bottom').setTicks(None)  # Let PyQtGraph handle X-axis formatting
+        self.psd_plot.getAxis('left').setTicks(None)    # Let PyQtGraph handle Y-axis formatting
+        
+        # Force scientific notation on Y-axis by setting tick format
+        from PyQt6.QtCore import QLocale
+        self.psd_plot.getAxis('left').setTickFormat(lambda x, p: f"{x:.2e}")
+        self.psd_plot.getAxis('bottom').setTickFormat(lambda x, p: f"{x:.0f}")
         
         # PSD curves
         self.psd_measured_curve = self.psd_plot.plot(pen='b', name='Measured PSD')
