@@ -323,7 +323,10 @@ class ControllerTab(QWidget):
         self.psd_plot.setLabel('left', 'PSD [g²/Hz]')
         self.psd_plot.setLabel('bottom', 'Frequency [Hz]')
         self.psd_plot.showGrid(x=True, y=True)
-        self.psd_plot.setXRange(10, 2500)  # Set frequency range 10-2500 Hz
+        
+        # Set X-axis range to 10-2500 Hz
+        self.psd_plot.setXRange(10, 2500)
+        self.psd_plot.getViewBox().setAutoVisible(x=False, y=True)
         
         # PSD curves
         self.psd_measured_curve = self.psd_plot.plot(pen='b', name='Measured PSD')
@@ -445,13 +448,7 @@ class ControllerTab(QWidget):
                 self.eq_bargraph = pg.BarGraphItem(x=freq_centers, height=gains, width=bar_widths, brush='b')
                 self.eq_plot.addItem(self.eq_bargraph)
                 
-                # Ensure proper frequency range is set after adding data
-                if len(freq_centers) > 0:
-                    freq_min = min(freq_centers) * 0.8
-                    freq_max = max(freq_centers) * 1.2
-                    # Set range with linear values (log mode handles the transformation)
-                    self.eq_plot.setXRange(freq_min, freq_max, padding=0)
-                    self.eq_plot.getViewBox().setAutoVisible(x=False, y=False)
+                # Keep the fixed range - don't override it dynamically
             else:
                 # Update existing bar graph
                 self.eq_bargraph.setOpts(height=gains)
@@ -518,7 +515,10 @@ class RealTimeDataTab(QWidget):
         self.psd_plot.setLabel('left', 'PSD [g²/Hz]')
         self.psd_plot.setLabel('bottom', 'Frequency [Hz]')
         self.psd_plot.showGrid(x=True, y=True)
-        self.psd_plot.setXRange(10, 2500)  # Set frequency range 10-2500 Hz
+        
+        # Set X-axis range to 10-2500 Hz
+        self.psd_plot.setXRange(10, 2500)
+        self.psd_plot.getViewBox().setAutoVisible(x=False, y=True)
         
         # PSD curve
         self.psd_curve = self.psd_plot.plot(pen='b', name='Control PSD')
