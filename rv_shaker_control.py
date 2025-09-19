@@ -25,7 +25,7 @@ device_ao = "Dev1/ao0"
 
 fs = 51200.0             # Sample rate [Hz]
 buf_seconds = 5.0        # Buffer size for AO/AI streaming
-block_seconds = 2.0      # Processing block duration (Welch windows fit inside)
+block_seconds = 1.0      # Processing block duration (Welch windows fit inside)
 
 # Target PSD points: list of (frequency [Hz], PSD level [g^2/Hz]) pairs
 # Set to achievable levels that won't cause saturation
@@ -867,7 +867,7 @@ try:
         ai_ch = ai_task.ai_channels.create_ai_accel_chan(
             physical_channel=device_ai,
             name_to_assign_to_channel="accel",
-            sensitivity=accel_mV_per_g/1000.0, # V/g
+            sensitivity=accel_mV_per_g,
             sensitivity_units=nidaqmx.constants.AccelSensitivityUnits.MVOLTS_PER_G,
             units=AccelUnits.G
         )

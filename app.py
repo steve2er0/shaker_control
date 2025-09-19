@@ -365,12 +365,18 @@ class ControllerTab(QWidget):
         vb_psd.setAutoVisible(x=False, y=True)
         self.psd_plot.enableAutoRange(x=False, y=True)
         
+        # PSD legend before curves so items auto-register
+        self.psd_legend = self.psd_plot.addLegend(offset=(10, 10))
+        try:
+            self.psd_legend.setBrush(pg.mkBrush(30, 30, 30, 160))
+        except Exception:
+            pass
+        
         # PSD curves
         self.psd_measured_curve = self.psd_plot.plot(pen='b', name='Measured PSD')
         self.psd_target_curve = self.psd_plot.plot(pen='r', style='--', name='Target PSD')
         self.psd_averaged_curve = self.psd_plot.plot(pen='g', name='Averaged PSD')
-        self.psd_plot.addLegend()
-        
+
         # Next row - Control metrics
         self.plot_widget.nextRow()
         
@@ -379,13 +385,17 @@ class ControllerTab(QWidget):
         self.metrics_plot.setLabel('left', 'Value')
         self.metrics_plot.setLabel('bottom', 'Update Index')
         self.metrics_plot.showGrid(x=True, y=True)
-        
+        self.metrics_legend = self.metrics_plot.addLegend(offset=(10, 10))
+        try:
+            self.metrics_legend.setBrush(pg.mkBrush(30, 30, 30, 160))
+        except Exception:
+            pass
+
         # Control metric curves
         self.rms_curve = self.metrics_plot.plot(pen='g', name='a_rms [g]')
         self.level_curve = self.metrics_plot.plot(pen='b', name='Level Fraction')
         self.sat_curve = self.metrics_plot.plot(pen='r', name='Saturation %')
         self.plant_gain_curve = self.metrics_plot.plot(pen='m', name='Plant Gain [g/V]')
-        self.metrics_plot.addLegend()
         
         # Next row - Equalizer gains
         self.plot_widget.nextRow()
@@ -405,8 +415,15 @@ class ControllerTab(QWidget):
         vb.setLimits(xMin=self.eq_xmin, xMax=self.eq_xmax)   # prevent pans/zooms beyond limits
         vb.setAutoVisible(x=False, y=False)                  # disable auto-rescale
 
+        # Legend and reference line for equalizer plot
+        self.eq_plot.addLegend(offset=(10, 10))
+        unity_pen = pg.mkPen(color='k', style=Qt.DashLine, width=1)
+        self.eq_unity_curve = self.eq_plot.plot(pen=unity_pen, name='Unity Gain')
+        self.eq_unity_curve.setData([])
+
         # Equalizer bar graph (will be created with data)
         self.eq_bargraph = None
+        self.eq_bar_in_legend = False
         
         layout.addWidget(self.plot_widget)
         self.setLayout(layout)
@@ -524,13 +541,23 @@ class ControllerTab(QWidget):
 
             if self.eq_bargraph is None:
                 self.eq_bargraph = pg.BarGraphItem(x=freq_centers, height=gains,
-                                                   width=bar_widths, brush='b')
+                                                   width=bar_widths, brush='b', name='EQ Band Gain')
                 self.eq_plot.addItem(self.eq_bargraph)
             else:
                 self.eq_bargraph.setOpts(x=freq_centers, height=gains, width=bar_widths)
 
+            if (self.eq_plot.legend is not None) and (not self.eq_bar_in_legend):
+                try:
+                    self.eq_plot.legend.addItem(self.eq_bargraph, 'EQ Band Gain')
+                    self.eq_bar_in_legend = True
+                except Exception:
+                    pass
+
             # Keep the x-range locked
             self.eq_plot.setXRange(self.eq_xmin, self.eq_xmax, padding=0)
+
+            # Update unity gain reference line
+            self.eq_unity_curve.setData([self.eq_xmin, self.eq_xmax], [1.0, 1.0])
 
 
 class RealTimeDataTab(QWidget):
@@ -864,7 +891,7 @@ class ControllerWorker(QObject):
                             min_val=-5.0,
                             max_val=5.0,
                             units=AccelUnits.G,
-                            sensitivity=accel_mV_per_g / 1000.0,
+                            sensitivity=accel_mV_per_g,
                             sensitivity_units=AccelSensitivityUnits.MILLIVOLTS_PER_G,
                             current_excit_source=excitation_source,
                             current_excit_val=excitation_current,
@@ -1288,4 +1315,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

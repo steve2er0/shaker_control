@@ -163,7 +163,7 @@ def main():
             ai_ch = ai_task.ai_channels.create_ai_accel_chan(
                 physical_channel=device_ai,
                 name_to_assign_to_channel="accel",
-                sensitivity=accel_mV_per_g/1000.0, # V/g
+                sensitivity=accel_mV_per_g, # mV/g
                 sensitivity_units=nidaqmx.constants.AccelSensitivityUnits.MVOLTS_PER_G,
                 units=AccelUnits.G
             )
