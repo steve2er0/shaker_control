@@ -417,6 +417,9 @@ class ControllerTab(QWidget):
         # Update equalizer plot
         if eq_data:
             freq_centers, gains = eq_data
+            # Debug: Print frequency range to diagnose axis issue
+            if len(freq_centers) > 0:
+                print(f"EQ Debug: freq_centers range: {min(freq_centers):.1f} - {max(freq_centers):.1f} Hz")
             if self.eq_bargraph is None:
                 # Create bar graph with narrow bars for many bands
                 num_bands = len(freq_centers)
