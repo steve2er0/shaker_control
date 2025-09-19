@@ -274,8 +274,8 @@ class ConfigurationTab(QWidget):
         QTimer.singleShot(1000, lambda: self.apply_button.setText("Apply Configuration"))
 
 
-class ControllerResponseTab(QWidget):
-    """Controller response tab with PyQtGraph plots"""
+class ControllerTab(QWidget):
+    """Controller tab with PyQtGraph plots and start/stop controls"""
     
     def __init__(self, shared_config):
         super().__init__()
@@ -294,9 +294,35 @@ class ControllerResponseTab(QWidget):
         self.eq_gains_data = deque(maxlen=self.max_points)
         
         self.update_counter = 0
+        
+        # Controller state
+        self.is_running = False
     
     def init_ui(self):
         layout = QVBoxLayout()
+        
+        # Control buttons
+        button_layout = QHBoxLayout()
+        
+        self.start_button = QPushButton("Start Controller")
+        # Connection will be made by MainWindow
+        
+        self.stop_button = QPushButton("Stop Controller")
+        # Connection will be made by MainWindow
+        self.stop_button.setEnabled(False)
+        
+        # Status label
+        self.status_label = QLabel("Status: Stopped")
+        font = QFont()
+        font.setBold(True)
+        self.status_label.setFont(font)
+        
+        button_layout.addWidget(self.start_button)
+        button_layout.addWidget(self.stop_button)
+        button_layout.addWidget(self.status_label)
+        button_layout.addStretch()
+        
+        layout.addLayout(button_layout)
         
         # Create plot widget
         self.plot_widget = pg.GraphicsLayoutWidget()
@@ -348,6 +374,20 @@ class ControllerResponseTab(QWidget):
         
         layout.addWidget(self.plot_widget)
         self.setLayout(layout)
+    
+    def start_controller(self):
+        """Start the controller (signal will be connected by MainWindow)"""
+        self.is_running = True
+        self.start_button.setEnabled(False)
+        self.stop_button.setEnabled(True)
+        self.status_label.setText("Status: Running")
+    
+    def stop_controller(self):
+        """Stop the controller (signal will be connected by MainWindow)"""
+        self.is_running = False
+        self.start_button.setEnabled(True)
+        self.stop_button.setEnabled(False)
+        self.status_label.setText("Status: Stopped")
     
     def update_plots(self, psd_data=None, metrics_data=None, eq_data=None):
         """Update all plots with new data"""
@@ -667,12 +707,12 @@ class MainWindow(QMainWindow):
         
         # Create tabs
         self.config_tab = ConfigurationTab(self.shared_config)
-        self.controller_tab = ControllerResponseTab(self.shared_config)
+        self.controller_tab = ControllerTab(self.shared_config)
         self.realtime_tab = RealTimeDataTab(self.shared_config)
         
         # Add tabs to widget
         self.tab_widget.addTab(self.config_tab, "Configuration")
-        self.tab_widget.addTab(self.controller_tab, "Controller Response")
+        self.tab_widget.addTab(self.controller_tab, "Controller")
         self.tab_widget.addTab(self.realtime_tab, "Real-Time Data")
         
         # Controller worker thread
@@ -690,8 +730,9 @@ class MainWindow(QMainWindow):
         self.controller_worker.realtime_data_ready.connect(
             self.realtime_tab.add_data_point)
         
-        # Start controller automatically
-        self.start_controller()
+        # Connect controller tab buttons to worker thread
+        self.controller_tab.start_button.clicked.connect(self.start_controller)
+        self.controller_tab.stop_button.clicked.connect(self.stop_controller)
     
     def init_ui(self):
         self.setWindowTitle("Random Vibration Shaker Control")
@@ -713,6 +754,15 @@ class MainWindow(QMainWindow):
         if not self.controller_worker.is_running:
             self.controller_thread.started.connect(self.controller_worker.run_controller)
             self.controller_thread.start()
+            # Update controller tab UI
+            self.controller_tab.start_controller()
+    
+    def stop_controller(self):
+        """Stop the controller"""
+        if self.controller_worker.is_running:
+            self.controller_worker.stop()
+            # Update controller tab UI
+            self.controller_tab.stop_controller()
     
     def closeEvent(self, event):
         """Handle application close"""
