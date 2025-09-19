@@ -785,20 +785,33 @@ class MainWindow(QMainWindow):
     def start_controller(self):
         """Start the controller in a separate thread"""
         if self.controller_worker is None or not self.controller_worker.is_running:
+            # Stop and cleanup any existing thread first
+            if hasattr(self, 'controller_thread') and self.controller_thread is not None:
+                if self.controller_thread.isRunning():
+                    self.controller_thread.quit()
+                    self.controller_thread.wait(1000)
+            
             # Create new thread each time (Qt requirement)
             self.controller_thread = QThread()
             self.controller_worker = ControllerWorker(self.shared_config)
             self.controller_worker.moveToThread(self.controller_thread)
             
-            # Reconnect signals for new worker
+            # Connect signals for new worker (use Qt.QueuedConnection for thread safety)
             self.controller_worker.psd_data_ready.connect(
-                lambda data: self.controller_tab.update_plots(psd_data=data))
+                lambda data: self.controller_tab.update_plots(psd_data=data), 
+                type=pg.QtCore.Qt.QueuedConnection)
             self.controller_worker.metrics_data_ready.connect(
-                lambda data: self.controller_tab.update_plots(metrics_data=data))
+                lambda data: self.controller_tab.update_plots(metrics_data=data),
+                type=pg.QtCore.Qt.QueuedConnection)
             self.controller_worker.eq_data_ready.connect(
-                lambda data: self.controller_tab.update_plots(eq_data=data))
+                lambda data: self.controller_tab.update_plots(eq_data=data),
+                type=pg.QtCore.Qt.QueuedConnection)
             self.controller_worker.realtime_data_ready.connect(
-                self.realtime_tab.add_data_point)
+                self.realtime_tab.add_data_point,
+                type=pg.QtCore.Qt.QueuedConnection)
+            
+            # Connect thread finished signal for cleanup
+            self.controller_thread.finished.connect(self.controller_thread.deleteLater)
             
             # Connect thread start to worker
             self.controller_thread.started.connect(self.controller_worker.run_controller)
@@ -813,27 +826,28 @@ class MainWindow(QMainWindow):
     
     def stop_controller(self):
         """Stop the controller"""
-        if hasattr(self, 'controller_worker') and self.controller_worker.is_running:
+        if hasattr(self, 'controller_worker') and self.controller_worker and self.controller_worker.is_running:
             self.controller_worker.stop()
             
+            # Update UI first
+            self.controller_tab.stop_controller()
+            self.realtime_tab.stop_streaming()
+            
             # Wait for thread to finish
-            if hasattr(self, 'controller_thread'):
+            if hasattr(self, 'controller_thread') and self.controller_thread:
                 self.controller_thread.quit()
                 self.controller_thread.wait(2000)  # Wait up to 2 seconds
-            
-            # Update controller tab UI
-            self.controller_tab.stop_controller()
-            # Also stop real-time data viewer
-            self.realtime_tab.stop_streaming()
     
     def closeEvent(self, event):
         """Handle application close"""
         # Stop controller worker
-        if self.controller_worker and self.controller_worker.is_running:
+        if hasattr(self, 'controller_worker') and self.controller_worker and self.controller_worker.is_running:
             self.controller_worker.stop()
-            if self.controller_thread:
-                self.controller_thread.quit()
-                self.controller_thread.wait(3000)  # Wait up to 3 seconds
+            
+        # Clean up thread
+        if hasattr(self, 'controller_thread') and self.controller_thread:
+            self.controller_thread.quit()
+            self.controller_thread.wait(3000)  # Wait up to 3 seconds
         
         event.accept()
 
