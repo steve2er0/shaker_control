@@ -412,17 +412,25 @@ class ControllerTab(QWidget):
         if eq_data:
             freq_centers, gains = eq_data
             if self.eq_bargraph is None:
-                # Create bar graph with narrow bars for many bands
+                # Create bar graph with proper width for log scale
                 num_bands = len(freq_centers)
-                if num_bands > 20:
-                    width_factor = 0.1  # Very narrow for many bands
-                elif num_bands > 12:
-                    width_factor = 0.2  # Narrow for moderate bands
-                else:
-                    width_factor = 0.3  # Normal width for few bands
                 
-                bar_widths = freq_centers * width_factor
-                self.eq_bargraph = pg.BarGraphItem(x=freq_centers, height=gains, width=bar_widths, brush='b')
+                # Calculate bar widths in log space for better visibility
+                log_freqs = np.log10(freq_centers)
+                if len(log_freqs) > 1:
+                    # Use average log spacing for bar width
+                    avg_log_spacing = np.mean(np.diff(log_freqs))
+                    # Convert back to linear space for bar width
+                    bar_widths = freq_centers * (10**avg_log_spacing - 1) * 0.8  # 80% of spacing
+                else:
+                    bar_widths = freq_centers * 0.3
+                
+                # Ensure minimum width for visibility
+                min_width = freq_centers * 0.1
+                bar_widths = np.maximum(bar_widths, min_width)
+                
+                self.eq_bargraph = pg.BarGraphItem(x=freq_centers, height=gains, width=bar_widths, 
+                                                 brush='steelblue', pen='darkblue')
                 self.eq_plot.addItem(self.eq_bargraph)
             else:
                 # Update existing bar graph
@@ -822,6 +830,9 @@ def main():
     app.setApplicationName("Random Vibration Control")
     app.setApplicationVersion("1.0")
     app.setOrganizationName("Vibration Testing Systems")
+    
+    # Use light theme (default Qt theme)
+    app.setStyle('Fusion')  # Clean, light theme
     
     # Create and show main window
     window = MainWindow()
