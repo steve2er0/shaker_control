@@ -19,6 +19,10 @@ INPUT_CHANNEL_LABELS = [
     "Response 3",
 ]
 
+# ============= TEST SELECTION =============
+# Choose between "random" (default) and "sine_sweep"
+TEST_MODE = "random"
+
 # ============= SYSTEM PARAMETERS =============
 FS = 51200.0                # Sample rate [Hz]
 BUF_SECONDS = 4           # Buffer size for AO/AI streaming
@@ -57,6 +61,16 @@ MAX_RMS_VOLTS = 1.4             # Maximum RMS voltage output
 CREST_SOFT_KNEE = 0.8           # Soft limiting threshold
 RMS_LIMIT_HEADROOM = 0.9        # Headroom when limiting
 
+# ============= SINE SWEEP PARAMETERS =============
+SINE_SWEEP_START_HZ = 20.0
+SINE_SWEEP_END_HZ = 2000.0
+SINE_SWEEP_G_LEVEL = 3.0        # g-peak unless SINE_SWEEP_G_LEVEL_IS_RMS is True
+SINE_SWEEP_G_LEVEL_IS_RMS = False
+SINE_SWEEP_OCTAVES_PER_MIN = 1.0
+SINE_SWEEP_REPEAT = True        # Restart sweep automatically when end reached
+SINE_SWEEP_INITIAL_LEVEL = 0.2  # Fraction of target level to start from
+SINE_SWEEP_MAX_LEVEL_RATE = 0.5 # Max change in level fraction per second
+
 # ============= SIMULATION MODE =============
 SIMULATION_MODE = False          # Set to False for real hardware
 
@@ -80,4 +94,3 @@ REALTIME_PSD_UPDATE_STRIDE = 5  # Compute PSD for response channels every N bloc
 
 
 AO_SYNC_WITH_AI = False      # Attempt to share AI sample clock with AO
-

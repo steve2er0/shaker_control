@@ -29,19 +29,31 @@ shaker_control/
 
 ### **Simulation Mode (No Hardware Required)**
 ```bash
-python3 main.py
+python3 app.py
 ```
 
 ### **Hardware Mode (Requires NI-DAQ)**
 1. Install DAQ drivers: `pip install nidaqmx`
 2. Edit `config.py`: Set `SIMULATION_MODE = False`
-3. Run: `python3 main.py`
+3. Run: `python3 app.py`
+
+### **Sine Sweep Mode**
+1. Edit `config.py`: set `TEST_MODE = "sine_sweep"`
+2. Configure sweep shape:
+   ```python
+   SINE_SWEEP_START_HZ = 20.0
+   SINE_SWEEP_END_HZ = 2000.0
+   SINE_SWEEP_G_LEVEL = 3.0        # g-peak unless SINE_SWEEP_G_LEVEL_IS_RMS is True
+   SINE_SWEEP_OCTAVES_PER_MIN = 1.0
+   ```
+3. Optional: adjust ramp with `SINE_SWEEP_INITIAL_LEVEL` and `SINE_SWEEP_MAX_LEVEL_RATE`
+4. Run `python3 app.py` (simulation or hardware as above)
 
 ## ⚙️ **Configuration**
 
 All parameters are centralized in `config.py`:
 
-### **Target PSD Profile**
+### **Random Vibration Target PSD Profile**
 ```python
 TARGET_PSD_POINTS = [
     (20.0, 0.0025),     # 20 Hz: 2.5e-3 g²/Hz
@@ -49,6 +61,19 @@ TARGET_PSD_POINTS = [
     (800.0, 0.01),      # 800 Hz: 1e-2 g²/Hz
     (2000.0, 0.0025)    # 2000 Hz: 2.5e-3 g²/Hz
 ]
+```
+
+### **Sine Sweep Parameters**
+```python
+TEST_MODE = "sine_sweep"            # Switch between 'random' and 'sine_sweep'
+SINE_SWEEP_START_HZ = 20.0
+SINE_SWEEP_END_HZ = 2000.0
+SINE_SWEEP_G_LEVEL = 3.0             # Specify peak-g or RMS via SINE_SWEEP_G_LEVEL_IS_RMS
+SINE_SWEEP_G_LEVEL_IS_RMS = False
+SINE_SWEEP_OCTAVES_PER_MIN = 1.0
+SINE_SWEEP_REPEAT = True             # Automatically restart when the sweep finishes
+SINE_SWEEP_INITIAL_LEVEL = 0.2       # Fraction of target to start from (smooth ramp)
+SINE_SWEEP_MAX_LEVEL_RATE = 0.5      # Fraction per second ramp rate
 ```
 
 ### **Control Tuning**

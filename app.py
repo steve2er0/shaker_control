@@ -20,7 +20,8 @@ from scipy.signal import welch
 # GUI imports
 from PySide6.QtWidgets import (QApplication, QMainWindow, QTabWidget, QVBoxLayout, 
                               QHBoxLayout, QWidget, QFormLayout, QDoubleSpinBox, 
-                              QSpinBox, QPushButton, QCheckBox, QLabel, QGroupBox)
+                              QSpinBox, QPushButton, QCheckBox, QLabel, QGroupBox,
+                              QComboBox, QScrollArea)
 from PySide6.QtCore import QTimer, Signal, QObject, QThread, Qt
 from PySide6.QtGui import QFont
 
@@ -41,11 +42,13 @@ except ImportError:
     nidaqmx = None
     DaqError = None
     NIDAQMX_AVAILABLE = False
+    WAIT_INFINITELY = None
 
 # Import our existing modules
 import config
 from rv_controller import MultiBandEqualizer, RandomVibrationController, create_bandpass_filter, make_bandlimited_noise, apply_safety_limiters
 from simulation import create_simulation_system
+from sine_sweep import LogSweepGenerator, target_g_rms
 
 
 class SharedConfig(QObject):
@@ -66,12 +69,30 @@ class SharedConfig(QObject):
         
         # Target PSD
         self.target_psd_points = list(config.TARGET_PSD_POINTS)
-        
+
+        # Test mode and sine sweep configuration
+        test_mode = str(getattr(config, 'TEST_MODE', 'random')).strip().lower()
+        if test_mode not in {"random", "sine_sweep"}:
+            test_mode = "random"
+        self.test_mode = test_mode
+        self.sine_start_hz = float(getattr(config, 'SINE_SWEEP_START_HZ', 20.0))
+        self.sine_end_hz = float(getattr(config, 'SINE_SWEEP_END_HZ', 2000.0))
+        self.sine_g_level = float(getattr(config, 'SINE_SWEEP_G_LEVEL', 3.0))
+        self.sine_g_level_is_rms = bool(getattr(config, 'SINE_SWEEP_G_LEVEL_IS_RMS', False))
+        self.sine_octaves_per_min = float(getattr(config, 'SINE_SWEEP_OCTAVES_PER_MIN', 1.0))
+        self.sine_repeat = bool(getattr(config, 'SINE_SWEEP_REPEAT', True))
+        # Use random vibration defaults if sine sweep overrides are not defined
+        sine_initial_default = getattr(config, 'SINE_SWEEP_INITIAL_LEVEL', config.INITIAL_LEVEL_FRACTION)
+        sine_rate_default = getattr(config, 'SINE_SWEEP_MAX_LEVEL_RATE', config.MAX_LEVEL_FRACTION_RATE)
+
         # Control parameters
         self.initial_level_fraction = config.INITIAL_LEVEL_FRACTION
         self.max_level_fraction_rate = config.MAX_LEVEL_FRACTION_RATE
         self.kp = config.KP
         self.ki = config.KI
+
+        self.sine_initial_level = float(sine_initial_default)
+        self.sine_max_level_rate = float(sine_rate_default)
         
         # Equalizer parameters
         self.eq_num_bands = config.EQ_NUM_BANDS
@@ -119,12 +140,16 @@ class ConfigurationTab(QWidget):
         self.load_values()
     
     def init_ui(self):
-        layout = QVBoxLayout()
+        outer_layout = QVBoxLayout()
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        content_widget = QWidget()
+        layout = QVBoxLayout(content_widget)
         
         # System Parameters Group
         system_group = QGroupBox("System Parameters")
         system_layout = QFormLayout()
-        
+
         self.fs_spin = QDoubleSpinBox()
         self.fs_spin.setRange(1000, 100000)
         self.fs_spin.setSuffix(" Hz")
@@ -148,13 +173,22 @@ class ConfigurationTab(QWidget):
         self.ao_volt_limit_spin.setRange(0.5, 10.0)
         self.ao_volt_limit_spin.setSuffix(" V")
         system_layout.addRow("AO Voltage Limit:", self.ao_volt_limit_spin)
-        
+
         system_group.setLayout(system_layout)
-        
+
+        # Test Mode Selection
+        mode_group = QGroupBox("Test Mode")
+        mode_layout = QFormLayout()
+        self.test_mode_combo = QComboBox()
+        self.test_mode_combo.addItem("Random Vibration", "random")
+        self.test_mode_combo.addItem("Sine Sweep", "sine_sweep")
+        mode_layout.addRow("Mode:", self.test_mode_combo)
+        mode_group.setLayout(mode_layout)
+
         # Control Parameters Group
         control_group = QGroupBox("Control Parameters")
         control_layout = QFormLayout()
-        
+
         self.kp_spin = QDoubleSpinBox()
         self.kp_spin.setRange(0.1, 10.0)
         self.kp_spin.setDecimals(2)
@@ -174,13 +208,58 @@ class ConfigurationTab(QWidget):
         self.max_level_rate_spin.setRange(0.1, 2.0)
         self.max_level_rate_spin.setDecimals(2)
         control_layout.addRow("Max Level Rate:", self.max_level_rate_spin)
-        
+
         control_group.setLayout(control_layout)
-        
+
+        # Sine sweep parameters
+        self.sine_group = QGroupBox("Sine Sweep Parameters")
+        sine_layout = QFormLayout()
+
+        self.sine_start_spin = QDoubleSpinBox()
+        self.sine_start_spin.setRange(0.1, 20000.0)
+        self.sine_start_spin.setDecimals(2)
+        self.sine_start_spin.setSuffix(" Hz")
+        sine_layout.addRow("Start Frequency:", self.sine_start_spin)
+
+        self.sine_end_spin = QDoubleSpinBox()
+        self.sine_end_spin.setRange(0.1, 20000.0)
+        self.sine_end_spin.setDecimals(2)
+        self.sine_end_spin.setSuffix(" Hz")
+        sine_layout.addRow("End Frequency:", self.sine_end_spin)
+
+        self.sine_g_level_spin = QDoubleSpinBox()
+        self.sine_g_level_spin.setRange(0.01, 30.0)
+        self.sine_g_level_spin.setDecimals(3)
+        self.sine_g_level_spin.setSuffix(" g")
+        sine_layout.addRow("Target g-Level:", self.sine_g_level_spin)
+
+        self.sine_g_level_is_rms_check = QCheckBox("g-Level is RMS (unchecked = peak)")
+        sine_layout.addRow("", self.sine_g_level_is_rms_check)
+
+        self.sine_octaves_spin = QDoubleSpinBox()
+        self.sine_octaves_spin.setRange(0.01, 10.0)
+        self.sine_octaves_spin.setDecimals(3)
+        sine_layout.addRow("Octaves per Minute:", self.sine_octaves_spin)
+
+        self.sine_repeat_check = QCheckBox("Repeat Sweep When Complete")
+        sine_layout.addRow("", self.sine_repeat_check)
+
+        self.sine_initial_level_spin = QDoubleSpinBox()
+        self.sine_initial_level_spin.setRange(0.0, 2.0)
+        self.sine_initial_level_spin.setDecimals(2)
+        sine_layout.addRow("Initial Level Fraction:", self.sine_initial_level_spin)
+
+        self.sine_max_level_rate_spin = QDoubleSpinBox()
+        self.sine_max_level_rate_spin.setRange(0.0, 5.0)
+        self.sine_max_level_rate_spin.setDecimals(2)
+        sine_layout.addRow("Max Level Rate:", self.sine_max_level_rate_spin)
+
+        self.sine_group.setLayout(sine_layout)
+
         # Equalizer Parameters Group
         eq_group = QGroupBox("Equalizer Parameters")
         eq_layout = QFormLayout()
-        
+
         self.eq_num_bands_spin = QSpinBox()
         self.eq_num_bands_spin.setRange(4, 64)
         eq_layout.addRow("Number of Bands:", self.eq_num_bands_spin)
@@ -237,18 +316,24 @@ class ConfigurationTab(QWidget):
         # Apply button
         self.apply_button = QPushButton("Apply Configuration")
         self.apply_button.clicked.connect(self.apply_config)
-        
+
         # Add all groups to main layout
         layout.addWidget(system_group)
+        layout.addWidget(mode_group)
         layout.addWidget(control_group)
+        layout.addWidget(self.sine_group)
         layout.addWidget(eq_group)
         layout.addWidget(safety_group)
         layout.addWidget(sim_group)
         layout.addWidget(self.apply_button)
         layout.addStretch()
-        
-        self.setLayout(layout)
-    
+
+        self.scroll_area.setWidget(content_widget)
+        outer_layout.addWidget(self.scroll_area)
+
+        self.setLayout(outer_layout)
+        self.test_mode_combo.currentIndexChanged.connect(self._update_mode_group_state)
+
     def load_values(self):
         """Load current values from shared config"""
         self.fs_spin.setValue(self.shared_config.fs)
@@ -268,11 +353,28 @@ class ConfigurationTab(QWidget):
         
         self.max_crest_factor_spin.setValue(self.shared_config.max_crest_factor)
         self.max_rms_volts_spin.setValue(self.shared_config.max_rms_volts)
-        
+
         self.simulation_mode_check.setChecked(self.shared_config.simulation_mode)
         self.sim_plant_gain_spin.setValue(self.shared_config.sim_plant_gain)
         self.sim_noise_level_spin.setValue(self.shared_config.sim_noise_level)
-    
+
+        mode_index = self.test_mode_combo.findData(self.shared_config.test_mode)
+        if mode_index != -1:
+            self.test_mode_combo.setCurrentIndex(mode_index)
+        else:
+            self.test_mode_combo.setCurrentIndex(0)
+
+        self.sine_start_spin.setValue(self.shared_config.sine_start_hz)
+        self.sine_end_spin.setValue(self.shared_config.sine_end_hz)
+        self.sine_g_level_spin.setValue(self.shared_config.sine_g_level)
+        self.sine_g_level_is_rms_check.setChecked(self.shared_config.sine_g_level_is_rms)
+        self.sine_octaves_spin.setValue(self.shared_config.sine_octaves_per_min)
+        self.sine_repeat_check.setChecked(self.shared_config.sine_repeat)
+        self.sine_initial_level_spin.setValue(self.shared_config.sine_initial_level)
+        self.sine_max_level_rate_spin.setValue(self.shared_config.sine_max_level_rate)
+
+        self._update_mode_group_state()
+
     def apply_config(self):
         """Apply form values to shared config"""
         self.shared_config.fs = self.fs_spin.value()
@@ -296,13 +398,28 @@ class ConfigurationTab(QWidget):
         self.shared_config.simulation_mode = self.simulation_mode_check.isChecked()
         self.shared_config.sim_plant_gain = self.sim_plant_gain_spin.value()
         self.shared_config.sim_noise_level = self.sim_noise_level_spin.value()
-        
+
+        self.shared_config.test_mode = self.test_mode_combo.currentData()
+        self.shared_config.sine_start_hz = self.sine_start_spin.value()
+        self.shared_config.sine_end_hz = self.sine_end_spin.value()
+        self.shared_config.sine_g_level = self.sine_g_level_spin.value()
+        self.shared_config.sine_g_level_is_rms = self.sine_g_level_is_rms_check.isChecked()
+        self.shared_config.sine_octaves_per_min = self.sine_octaves_spin.value()
+        self.shared_config.sine_repeat = self.sine_repeat_check.isChecked()
+        self.shared_config.sine_initial_level = self.sine_initial_level_spin.value()
+        self.shared_config.sine_max_level_rate = self.sine_max_level_rate_spin.value()
+
         # Emit signal that config was updated
         self.shared_config.config_updated.emit()
-        
+
         # Visual feedback
         self.apply_button.setText("Applied!")
         QTimer.singleShot(1000, lambda: self.apply_button.setText("Apply Configuration"))
+
+    def _update_mode_group_state(self):
+        """Enable sine sweep controls only when relevant."""
+        is_sine = self.test_mode_combo.currentData() == "sine_sweep"
+        self.sine_group.setEnabled(is_sine)
 
 
 class ControllerTab(QWidget):
@@ -508,8 +625,15 @@ class ControllerTab(QWidget):
             self.plant_gain_curve.setData(list(self.time_data), list(self.plant_gain_data))
         
         # Update equalizer plot
-        if eq_data:
-            freq_centers, gains = eq_data
+        if eq_data is not None:
+            try:
+                freq_centers, gains = eq_data
+            except (TypeError, ValueError):
+                freq_centers, gains = ([], [])
+
+            if freq_centers is None or len(freq_centers) == 0:
+                self._clear_eq_plot()
+                return
 
             # Sanitize: keep only finite, >0 freqs; clip to [20, 2000] Hz
             freq_centers = np.asarray(freq_centers, dtype=float)
@@ -527,6 +651,7 @@ class ControllerTab(QWidget):
             freq_centers = np.clip(freq_centers, self.eq_xmin, self.eq_xmax)
 
             if freq_centers.size == 0:
+                self._clear_eq_plot()
                 return
 
             # Bar widths proportional to center frequency
@@ -558,6 +683,19 @@ class ControllerTab(QWidget):
 
             # Update unity gain reference line
             self.eq_unity_curve.setData([self.eq_xmin, self.eq_xmax], [1.0, 1.0])
+        else:
+            self._clear_eq_plot()
+
+    def _clear_eq_plot(self):
+        """Remove equalizer bars when not in use."""
+        if self.eq_bargraph is not None:
+            try:
+                self.eq_plot.removeItem(self.eq_bargraph)
+            except Exception:
+                pass
+            self.eq_bargraph = None
+            self.eq_bar_in_legend = False
+        self.eq_unity_curve.setData([])
 
 
 class RealTimeDataTab(QWidget):
@@ -1023,6 +1161,19 @@ class ControllerWorker(QObject):
             self.status_message.emit(f"Controller running ({mode_label.lower()})...")
             print(f"Controller worker running in {mode_label.lower()} mode.")
 
+            test_mode = getattr(self.shared_config, 'test_mode', 'random') or 'random'
+            if test_mode.lower() == 'sine_sweep':
+                self._run_sine_sweep_loop(
+                    ao_writer=ao_writer,
+                    ai_reader=ai_reader,
+                    simulation_mode=simulation_mode,
+                    volts_to_g_scale=volts_to_g_scale,
+                    plant_gain_initial=plant_gain_g_per_V,
+                    fs=fs,
+                    block_samples=block_samples,
+                )
+                return
+
             # Control loop variables
             level_fraction = self.shared_config.initial_level_fraction
             block_duration = block_samples / max(fs, 1e-9)
@@ -1177,7 +1328,164 @@ class ControllerWorker(QObject):
                     pass
             self.is_running = False
             self.status_message.emit("Controller stopped")
-    
+
+    def _run_sine_sweep_loop(self, ao_writer, ai_reader, simulation_mode, volts_to_g_scale,
+                              plant_gain_initial, fs, block_samples):
+        """Execute a sine sweep control loop using current configuration."""
+        level_fraction = float(np.clip(self.shared_config.sine_initial_level, 0.0, 1.0))
+        start_hz = max(0.01, float(self.shared_config.sine_start_hz))
+        end_hz = max(0.01, float(self.shared_config.sine_end_hz))
+        try:
+            target_rms = float(
+                target_g_rms(
+                    self.shared_config.sine_g_level,
+                    self.shared_config.sine_g_level_is_rms,
+                )
+            )
+        except ValueError:
+            target_rms = max(abs(float(self.shared_config.sine_g_level)), 1e-3)
+        max_level_rate = max(0.0, float(self.shared_config.sine_max_level_rate))
+
+        generator = LogSweepGenerator(
+            fs=fs,
+            start_freq=start_hz,
+            end_freq=end_hz,
+            octaves_per_minute=float(self.shared_config.sine_octaves_per_min),
+            repeat=bool(self.shared_config.sine_repeat),
+        )
+
+        block_duration = block_samples / max(fs, 1e-9)
+        if not simulation_mode and WAIT_INFINITELY is not None:
+            io_timeout = WAIT_INFINITELY
+        else:
+            io_timeout = max(1.0, block_duration * 2.0)
+        loop_sleep = block_duration if simulation_mode else 0.0
+        plant_gain = max(float(plant_gain_initial), 1e-6)
+        last_level_update = time.time()
+        t_last_print = time.time()
+
+        # Clear EQ display since it is not used in sine sweep mode
+        self.eq_data_ready.emit(None)
+        self.psd_averaged = None
+
+        while not self.should_stop.is_set():
+            loop_start = time.perf_counter()
+            unit_drive, sweep_status = generator.generate_block(block_samples)
+
+            target_rms_block = target_rms * max(level_fraction, 0.0)
+            if target_rms_block <= 0:
+                target_rms_block = max(target_rms * max(level_fraction, 0.01), 1e-6)
+
+            volts_block = (target_rms_block / max(plant_gain, 1e-6)) * unit_drive
+            if np.std(volts_block) < 1e-7:
+                volts_block = volts_block + 1e-7 * np.random.randn(block_samples)
+
+            volts_block, limiter_stats = apply_safety_limiters(
+                volts_block,
+                self.shared_config.max_crest_factor,
+                self.shared_config.max_rms_volts,
+                0.8,
+                0.9,
+            )
+            volts_block = np.clip(
+                volts_block,
+                -self.shared_config.ao_volt_limit,
+                self.shared_config.ao_volt_limit,
+            )
+
+            if simulation_mode:
+                ao_writer.write_many_sample(volts_block)
+            else:
+                ao_writer.write_many_sample(volts_block, timeout=io_timeout)
+
+            if self.shared_config.num_input_channels > 1:
+                data = np.empty((self.shared_config.num_input_channels, block_samples), dtype=np.float64)
+            else:
+                data = np.empty(block_samples, dtype=np.float64)
+
+            if simulation_mode:
+                ai_reader.read_many_sample(data, number_of_samples_per_channel=block_samples)
+            else:
+                ai_reader.read_many_sample(
+                    data,
+                    number_of_samples_per_channel=block_samples,
+                    timeout=io_timeout,
+                )
+
+            if volts_to_g_scale is not None:
+                if data.ndim == 2:
+                    data[0, :] *= volts_to_g_scale
+                    accel_data = data[0]
+                else:
+                    data *= volts_to_g_scale
+                    accel_data = data
+            else:
+                accel_data = data[0] if data.ndim == 2 else data
+
+            a_rms_meas = float(np.sqrt(np.mean(np.square(accel_data))))
+            v_rms_cmd = float(np.sqrt(np.mean(np.square(volts_block))))
+            if v_rms_cmd > 1e-9:
+                new_gain = a_rms_meas / max(v_rms_cmd, 1e-9)
+                plant_gain = 0.8 * plant_gain + 0.2 * new_gain
+
+            now = time.time()
+            dt = max(now - last_level_update, 1e-3)
+            last_level_update = now
+            if level_fraction < 1.0 and max_level_rate > 0.0:
+                level_fraction = min(1.0, level_fraction + max_level_rate * dt)
+
+            sat_frac = float(np.mean(np.abs(volts_block) >= (0.98 * self.shared_config.ao_volt_limit)))
+            if sat_frac > 0.2:
+                level_fraction = max(0.0, level_fraction * 0.9)
+                self.status_message.emit("AO near saturation; backing off level.")
+
+            if target_rms > 0 and a_rms_meas > target_rms * 1.3:
+                level_fraction = max(0.0, level_fraction * 0.9)
+                self.status_message.emit("Measured level above target; reducing drive.")
+
+            nperseg = min(len(accel_data), max(256, int(self.shared_config.welch_nperseg)))
+            if nperseg > len(accel_data):
+                nperseg = len(accel_data)
+            f, Pxx = welch(accel_data, fs=fs, nperseg=nperseg)
+
+            if self.psd_averaged is None or len(self.psd_averaged) != len(Pxx):
+                self.psd_averaged = Pxx.copy()
+            else:
+                self.psd_averaged = (
+                    self.psd_alpha * Pxx + (1 - self.psd_alpha) * self.psd_averaged
+                )
+
+            self.psd_data_ready.emit((f, Pxx, None, self.psd_averaged))
+            self.metrics_data_ready.emit(
+                (a_rms_meas, a_rms_meas, target_rms, level_fraction, sat_frac, plant_gain)
+            )
+            self.realtime_data_ready.emit(np.array(data, copy=True))
+
+            if (now - t_last_print) >= getattr(config, 'CONSOLE_UPDATE_INTERVAL', 5.0):
+                t_last_print = now
+                freq_center = np.sqrt(
+                    max(sweep_status.freq_start, 1e-6) * max(sweep_status.freq_end, 1e-6)
+                )
+                limiter_flag = " LIMIT" if limiter_stats.get('any_limiting') else ""
+                print(
+                    f"f≈{freq_center:.1f} Hz | target={target_rms_block*np.sqrt(2):.3g} gpk "
+                    f"({target_rms_block:.3g} g RMS) | meas={a_rms_meas*np.sqrt(2):.3g} gpk "
+                    f"({a_rms_meas:.3g} g RMS) | level={level_fraction:.3f} | "
+                    f"gain={plant_gain:.3g} g/V | sat={sat_frac:.1%}{limiter_flag}"
+                )
+
+            if sweep_status.cycle_completed and not self.shared_config.sine_repeat:
+                self.status_message.emit("Sine sweep complete")
+                break
+
+            if simulation_mode:
+                if loop_sleep > 0:
+                    time.sleep(loop_sleep)
+            else:
+                remaining = block_duration - (time.perf_counter() - loop_start)
+                if remaining > 0:
+                    time.sleep(remaining)
+
     def stop(self):
         """Stop the controller loop"""
         self.should_stop.set()
@@ -1213,7 +1521,7 @@ class MainWindow(QMainWindow):
     
     def init_ui(self):
         self.setWindowTitle("Random Vibration Shaker Control")
-        self.setGeometry(100, 100, 1400, 900)
+        self.setGeometry(100, 100, 1200, 800)
         
         # Create central widget and tab widget
         central_widget = QWidget()
