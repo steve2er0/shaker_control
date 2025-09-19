@@ -601,7 +601,7 @@ class LivePSDPlotter:
             if len(valid_psd) > 0:
                 y_min = max(1e-8, np.min(valid_psd) * 0.1)
                 y_max = np.max(valid_psd) * 10.0
-                if y_max > y_min:
+            if y_max > y_min:
                     self.ax_psd.set_ylim([y_min, y_max])
             else:
                 # Default range when no valid data - use target PSD range

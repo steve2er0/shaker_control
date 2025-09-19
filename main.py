@@ -143,7 +143,8 @@ def main():
         # Create simulation system
         ao_writer, ai_reader, ai_task, ao_task = create_simulation_system(
             fs, sim_plant_gain, sim_resonances, sim_noise_level, 
-            sim_delay_samples, sim_nonlinearity
+            sim_delay_samples, sim_nonlinearity,
+            num_input_channels=len(getattr(config, "INPUT_CHANNEL_LABELS", ["Control Accel"]))
         )
         
         print("Simulation setup complete")
