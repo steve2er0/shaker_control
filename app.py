@@ -357,14 +357,11 @@ class ControllerTab(QWidget):
         self.eq_plot.showGrid(x=True, y=True)
         self.eq_plot.setYRange(0.1, 10.0)
         
-        # Set X-axis range in log space for proper display
-        self.eq_plot.setXRange(np.log10(10), np.log10(3000))
+        # Set X-axis range for proper display
+        self.eq_plot.setXRange(10, 3000)
         
         # Disable auto-scaling to prevent range from being overwritten
         self.eq_plot.getViewBox().setAutoVisible(x=False, y=False)
-        
-        # Configure X-axis to show actual frequency values
-        self.eq_plot.getAxis('bottom').setLogMode(True)
         
         # Equalizer bar graph (will be updated with data)
         self.eq_bargraph = None
@@ -443,8 +440,8 @@ class ControllerTab(QWidget):
                 if len(freq_centers) > 0:
                     freq_min = min(freq_centers) * 0.8
                     freq_max = max(freq_centers) * 1.2
-                    # Set range in log space when using log mode
-                    self.eq_plot.setXRange(np.log10(freq_min), np.log10(freq_max), padding=0)
+                    # Set range with linear values (log mode handles the transformation)
+                    self.eq_plot.setXRange(freq_min, freq_max, padding=0)
                     self.eq_plot.getViewBox().setAutoVisible(x=False, y=False)
             else:
                 # Update existing bar graph
