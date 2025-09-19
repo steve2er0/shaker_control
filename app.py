@@ -4,8 +4,8 @@ Random Vibration Shaker Control - Desktop GUI Application
 
 A professional desktop application for random vibration testing with:
 - Configuration tab for all system parameters
-- Controller response visualization
-- Real-time data streaming and monitoring
+- Controller tab with start/stop controls and response visualization
+- Real-time data tab with time domain and PSD plots
 
 Built with PySide6 and PyQtGraph for high-performance plotting.
 """
@@ -15,13 +15,12 @@ import numpy as np
 import time
 from collections import deque
 from threading import Thread, Event
-import copy
+from scipy.signal import welch
 
 # GUI imports
 from PySide6.QtWidgets import (QApplication, QMainWindow, QTabWidget, QVBoxLayout, 
                               QHBoxLayout, QWidget, QFormLayout, QDoubleSpinBox, 
-                              QSpinBox, QPushButton, QCheckBox, QLabel, QGroupBox,
-                              QGridLayout, QComboBox)
+                              QSpinBox, QPushButton, QCheckBox, QLabel, QGroupBox)
 from PySide6.QtCore import QTimer, Signal, QObject, QThread
 from PySide6.QtGui import QFont
 
@@ -86,9 +85,6 @@ class ConfigurationTab(QWidget):
     
     def init_ui(self):
         layout = QVBoxLayout()
-        
-        # Create form layout
-        form_layout = QFormLayout()
         
         # System Parameters Group
         system_group = QGroupBox("System Parameters")
@@ -275,7 +271,7 @@ class ConfigurationTab(QWidget):
 
 
 class ControllerTab(QWidget):
-    """Controller tab with PyQtGraph plots and start/stop controls"""
+    """Controller tab with start/stop controls and PyQtGraph plots"""
     
     def __init__(self, shared_config):
         super().__init__()
@@ -291,11 +287,8 @@ class ControllerTab(QWidget):
         self.level_data = deque(maxlen=self.max_points)
         self.sat_data = deque(maxlen=self.max_points)
         self.plant_gain_data = deque(maxlen=self.max_points)
-        self.eq_gains_data = deque(maxlen=self.max_points)
         
         self.update_counter = 0
-        
-        # Controller state
         self.is_running = False
     
     def init_ui(self):
@@ -305,10 +298,7 @@ class ControllerTab(QWidget):
         button_layout = QHBoxLayout()
         
         self.start_button = QPushButton("Start Controller")
-        # Connection will be made by MainWindow
-        
         self.stop_button = QPushButton("Stop Controller")
-        # Connection will be made by MainWindow
         self.stop_button.setEnabled(False)
         
         # Status label
@@ -337,8 +327,6 @@ class ControllerTab(QWidget):
         # PSD curves
         self.psd_measured_curve = self.psd_plot.plot(pen='b', name='Measured PSD')
         self.psd_target_curve = self.psd_plot.plot(pen='r', style='--', name='Target PSD')
-        
-        # Add legend
         self.psd_plot.addLegend()
         
         # Next row - Control metrics
@@ -355,7 +343,6 @@ class ControllerTab(QWidget):
         self.level_curve = self.metrics_plot.plot(pen='b', name='Level Fraction')
         self.sat_curve = self.metrics_plot.plot(pen='r', name='Saturation %')
         self.plant_gain_curve = self.metrics_plot.plot(pen='m', name='Plant Gain [g/V]')
-        
         self.metrics_plot.addLegend()
         
         # Next row - Equalizer gains
@@ -376,14 +363,14 @@ class ControllerTab(QWidget):
         self.setLayout(layout)
     
     def start_controller(self):
-        """Start the controller (signal will be connected by MainWindow)"""
+        """Update UI state when controller starts"""
         self.is_running = True
         self.start_button.setEnabled(False)
         self.stop_button.setEnabled(True)
         self.status_label.setText("Status: Running")
     
     def stop_controller(self):
-        """Stop the controller (signal will be connected by MainWindow)"""
+        """Update UI state when controller stops"""
         self.is_running = False
         self.start_button.setEnabled(True)
         self.stop_button.setEnabled(False)
@@ -397,7 +384,9 @@ class ControllerTab(QWidget):
             f, psd_measured, psd_target = psd_data
             self.psd_measured_curve.setData(f, psd_measured)
             if psd_target is not None:
-                self.psd_target_curve.setData(f, psd_target)
+                valid_target = ~np.isnan(psd_target)
+                if np.any(valid_target):
+                    self.psd_target_curve.setData(f[valid_target], psd_target[valid_target])
         
         # Update metrics plot
         if metrics_data:
@@ -421,8 +410,17 @@ class ControllerTab(QWidget):
         if eq_data:
             freq_centers, gains = eq_data
             if self.eq_bargraph is None:
-                # Create bar graph
-                self.eq_bargraph = pg.BarGraphItem(x=freq_centers, height=gains, width=0.1, brush='b')
+                # Create bar graph with narrow bars for many bands
+                num_bands = len(freq_centers)
+                if num_bands > 20:
+                    width_factor = 0.1  # Very narrow for many bands
+                elif num_bands > 12:
+                    width_factor = 0.2  # Narrow for moderate bands
+                else:
+                    width_factor = 0.3  # Normal width for few bands
+                
+                bar_widths = freq_centers * width_factor
+                self.eq_bargraph = pg.BarGraphItem(x=freq_centers, height=gains, width=bar_widths, brush='b')
                 self.eq_plot.addItem(self.eq_bargraph)
             else:
                 # Update existing bar graph
@@ -430,7 +428,7 @@ class ControllerTab(QWidget):
 
 
 class RealTimeDataTab(QWidget):
-    """Real-time data tab with streaming plots and controls"""
+    """Real-time data tab with time domain and PSD plots"""
     
     def __init__(self, shared_config):
         super().__init__()
@@ -441,7 +439,10 @@ class RealTimeDataTab(QWidget):
         self.max_time_window = 10.0  # 10 seconds
         self.streaming_data = deque()
         self.streaming_time = deque()
-        self.start_time = None
+        self.start_time = time.time()
+        
+        # Data storage for PSD calculation
+        self.psd_data_buffer = deque(maxlen=int(8192))  # Buffer for PSD calculation
         
         # Streaming state
         self.is_streaming = False
@@ -454,40 +455,44 @@ class RealTimeDataTab(QWidget):
     def init_ui(self):
         layout = QVBoxLayout()
         
-        # Control buttons
-        button_layout = QHBoxLayout()
-        
-        self.start_button = QPushButton("Start")
-        self.start_button.clicked.connect(self.start_streaming)
-        
-        self.stop_button = QPushButton("Stop")
-        self.stop_button.clicked.connect(self.stop_streaming)
-        self.stop_button.setEnabled(False)
+        # Display options
+        options_layout = QHBoxLayout()
         
         self.autoscale_check = QCheckBox("Enable Autoscaling")
         self.autoscale_check.setChecked(True)
         
-        button_layout.addWidget(self.start_button)
-        button_layout.addWidget(self.stop_button)
-        button_layout.addWidget(self.autoscale_check)
-        button_layout.addStretch()
+        options_layout.addWidget(QLabel("Display Options:"))
+        options_layout.addWidget(self.autoscale_check)
+        options_layout.addStretch()
         
-        # Status label
-        self.status_label = QLabel("Status: Stopped")
-        button_layout.addWidget(self.status_label)
+        layout.addLayout(options_layout)
         
-        # Plot widget
-        self.plot_widget = pg.PlotWidget(title="Real-Time Acceleration Data")
-        self.plot_widget.setLabel('left', 'Acceleration', units='g')
-        self.plot_widget.setLabel('bottom', 'Time', units='s')
-        self.plot_widget.showGrid(x=True, y=True)
+        # Create plot widget with two plots
+        self.plot_widget = pg.GraphicsLayoutWidget()
         
-        # Plot curve
-        self.realtime_curve = self.plot_widget.plot(pen='g', name='Acceleration')
+        # Time domain plot
+        self.time_plot = self.plot_widget.addPlot(title="Real-Time Acceleration Data")
+        self.time_plot.setLabel('left', 'Acceleration', units='g')
+        self.time_plot.setLabel('bottom', 'Time', units='s')
+        self.time_plot.showGrid(x=True, y=True)
         
-        layout.addLayout(button_layout)
+        # Time domain curve
+        self.realtime_curve = self.time_plot.plot(pen='g', name='Acceleration')
+        
+        # Next row - PSD plot
+        self.plot_widget.nextRow()
+        
+        # PSD plot
+        self.psd_plot = self.plot_widget.addPlot(title="Control Accelerometer PSD")
+        self.psd_plot.setLogMode(x=True, y=True)
+        self.psd_plot.setLabel('left', 'PSD', units='g²/Hz')
+        self.psd_plot.setLabel('bottom', 'Frequency', units='Hz')
+        self.psd_plot.showGrid(x=True, y=True)
+        
+        # PSD curve
+        self.psd_curve = self.psd_plot.plot(pen='b', name='Control PSD')
+        
         layout.addWidget(self.plot_widget)
-        
         self.setLayout(layout)
     
     def start_streaming(self):
@@ -496,10 +501,7 @@ class RealTimeDataTab(QWidget):
         self.start_time = time.time()
         self.streaming_data.clear()
         self.streaming_time.clear()
-        
-        self.start_button.setEnabled(False)
-        self.stop_button.setEnabled(True)
-        self.status_label.setText("Status: Streaming")
+        self.psd_data_buffer.clear()
         
         # Start update timer
         self.update_timer.start()
@@ -507,10 +509,6 @@ class RealTimeDataTab(QWidget):
     def stop_streaming(self):
         """Stop real-time data streaming"""
         self.is_streaming = False
-        
-        self.start_button.setEnabled(True)
-        self.stop_button.setEnabled(False)
-        self.status_label.setText("Status: Stopped")
         
         # Stop update timer
         self.update_timer.stop()
@@ -526,6 +524,9 @@ class RealTimeDataTab(QWidget):
         self.streaming_time.append(current_time)
         self.streaming_data.append(acceleration_value)
         
+        # Also add to PSD buffer
+        self.psd_data_buffer.append(acceleration_value)
+        
         # Remove old data outside time window
         while self.streaming_time and (current_time - self.streaming_time[0]) > self.max_time_window:
             self.streaming_time.popleft()
@@ -536,19 +537,36 @@ class RealTimeDataTab(QWidget):
         if not self.is_streaming or not self.streaming_time:
             return
         
-        # Update plot data
+        # Update time domain plot
         self.realtime_curve.setData(list(self.streaming_time), list(self.streaming_data))
         
-        # Autoscaling
+        # Update PSD plot if we have enough data
+        if len(self.psd_data_buffer) > 1024:  # Need enough data for meaningful PSD
+            try:
+                # Calculate PSD of buffered data
+                fs = self.shared_config.fs
+                data_array = np.array(list(self.psd_data_buffer))
+                
+                # Use Welch method for PSD
+                f, Pxx = welch(data_array, fs=fs, nperseg=min(1024, len(data_array)//4), 
+                              noverlap=None, detrend='constant')
+                
+                # Update PSD plot
+                self.psd_curve.setData(f, Pxx)
+                
+            except Exception:
+                pass  # Skip PSD update if calculation fails
+        
+        # Autoscaling for time domain
         if self.autoscale_check.isChecked() and self.streaming_data:
             y_min = min(self.streaming_data)
             y_max = max(self.streaming_data)
-            margin = (y_max - y_min) * 0.1
-            self.plot_widget.setYRange(y_min - margin, y_max + margin)
+            margin = (y_max - y_min) * 0.1 if y_max != y_min else 0.1
+            self.time_plot.setYRange(y_min - margin, y_max + margin)
             
             if self.streaming_time:
-                self.plot_widget.setXRange(max(0, self.streaming_time[-1] - self.max_time_window), 
-                                          self.streaming_time[-1])
+                self.time_plot.setXRange(max(0, self.streaming_time[-1] - self.max_time_window), 
+                                        self.streaming_time[-1])
 
 
 class ControllerWorker(QObject):
@@ -736,7 +754,7 @@ class MainWindow(QMainWindow):
     
     def init_ui(self):
         self.setWindowTitle("Random Vibration Shaker Control")
-        self.setGeometry(100, 100, 1200, 800)
+        self.setGeometry(100, 100, 1400, 900)
         
         # Create central widget and tab widget
         central_widget = QWidget()
@@ -756,6 +774,8 @@ class MainWindow(QMainWindow):
             self.controller_thread.start()
             # Update controller tab UI
             self.controller_tab.start_controller()
+            # Also start real-time data viewer
+            self.realtime_tab.start_streaming()
     
     def stop_controller(self):
         """Stop the controller"""
@@ -763,6 +783,8 @@ class MainWindow(QMainWindow):
             self.controller_worker.stop()
             # Update controller tab UI
             self.controller_tab.stop_controller()
+            # Also stop real-time data viewer
+            self.realtime_tab.stop_streaming()
     
     def closeEvent(self, event):
         """Handle application close"""
@@ -773,128 +795,6 @@ class MainWindow(QMainWindow):
             self.controller_thread.wait(3000)  # Wait up to 3 seconds
         
         event.accept()
-
-
-class RealTimeDataTab(QWidget):
-    """Real-time data tab with streaming plots and controls"""
-    
-    def __init__(self, shared_config):
-        super().__init__()
-        self.shared_config = shared_config
-        self.init_ui()
-        
-        # Data storage for streaming
-        self.max_time_window = 10.0  # 10 seconds
-        self.streaming_data = deque()
-        self.streaming_time = deque()
-        self.start_time = None
-        
-        # Streaming state
-        self.is_streaming = False
-        
-        # Timer for plot updates
-        self.update_timer = QTimer()
-        self.update_timer.timeout.connect(self.update_streaming_plot)
-        self.update_timer.setInterval(33)  # ~30 fps
-    
-    def init_ui(self):
-        layout = QVBoxLayout()
-        
-        # Control buttons
-        button_layout = QHBoxLayout()
-        
-        self.start_button = QPushButton("Start")
-        self.start_button.clicked.connect(self.start_streaming)
-        
-        self.stop_button = QPushButton("Stop")
-        self.stop_button.clicked.connect(self.stop_streaming)
-        self.stop_button.setEnabled(False)
-        
-        self.autoscale_check = QCheckBox("Enable Autoscaling")
-        self.autoscale_check.setChecked(True)
-        
-        button_layout.addWidget(self.start_button)
-        button_layout.addWidget(self.stop_button)
-        button_layout.addWidget(self.autoscale_check)
-        button_layout.addStretch()
-        
-        # Status label
-        self.status_label = QLabel("Status: Stopped")
-        button_layout.addWidget(self.status_label)
-        
-        # Plot widget
-        self.plot_widget = pg.PlotWidget(title="Real-Time Acceleration Data")
-        self.plot_widget.setLabel('left', 'Acceleration', units='g')
-        self.plot_widget.setLabel('bottom', 'Time', units='s')
-        self.plot_widget.showGrid(x=True, y=True)
-        
-        # Plot curve
-        self.realtime_curve = self.plot_widget.plot(pen='g', name='Acceleration')
-        
-        layout.addLayout(button_layout)
-        layout.addWidget(self.plot_widget)
-        
-        self.setLayout(layout)
-    
-    def start_streaming(self):
-        """Start real-time data streaming"""
-        self.is_streaming = True
-        self.start_time = time.time()
-        self.streaming_data.clear()
-        self.streaming_time.clear()
-        
-        self.start_button.setEnabled(False)
-        self.stop_button.setEnabled(True)
-        self.status_label.setText("Status: Streaming")
-        
-        # Start update timer
-        self.update_timer.start()
-    
-    def stop_streaming(self):
-        """Stop real-time data streaming"""
-        self.is_streaming = False
-        
-        self.start_button.setEnabled(True)
-        self.stop_button.setEnabled(False)
-        self.status_label.setText("Status: Stopped")
-        
-        # Stop update timer
-        self.update_timer.stop()
-    
-    def add_data_point(self, acceleration_value):
-        """Add new data point to streaming plot"""
-        if not self.is_streaming:
-            return
-        
-        current_time = time.time() - self.start_time
-        
-        # Add new data
-        self.streaming_time.append(current_time)
-        self.streaming_data.append(acceleration_value)
-        
-        # Remove old data outside time window
-        while self.streaming_time and (current_time - self.streaming_time[0]) > self.max_time_window:
-            self.streaming_time.popleft()
-            self.streaming_data.popleft()
-    
-    def update_streaming_plot(self):
-        """Update the streaming plot display"""
-        if not self.is_streaming or not self.streaming_time:
-            return
-        
-        # Update plot data
-        self.realtime_curve.setData(list(self.streaming_time), list(self.streaming_data))
-        
-        # Autoscaling
-        if self.autoscale_check.isChecked() and self.streaming_data:
-            y_min = min(self.streaming_data)
-            y_max = max(self.streaming_data)
-            margin = (y_max - y_min) * 0.1
-            self.plot_widget.setYRange(y_min - margin, y_max + margin)
-            
-            if self.streaming_time:
-                self.plot_widget.setXRange(max(0, self.streaming_time[-1] - self.max_time_window), 
-                                          self.streaming_time[-1])
 
 
 def main():
