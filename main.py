@@ -122,6 +122,9 @@ def main():
         gain_limits=eq_gain_limits, adapt_rate=eq_adapt_rate,
         smooth_factor=eq_smooth_factor
     )
+    eq_adapt_level_threshold = float(getattr(config, 'EQ_ADAPT_LEVEL_THRESHOLD', 0.4))
+    eq_adapt_level_power = float(max(0.0, getattr(config, 'EQ_ADAPT_LEVEL_POWER', 1.0)))
+    eq_adapt_min_weight = float(np.clip(getattr(config, 'EQ_ADAPT_MIN_WEIGHT', 0.0), 0.0, 1.0))
     
     # Create dashboard
     plotter = LivePSDPlotter(
@@ -284,7 +287,18 @@ def main():
                 plant_gain_g_per_V = 0.8*plant_gain_g_per_V + 0.2*new_gain
 
             # Update equalizer gains based on measured vs target PSD
-            equalizer.update_gains(f, Pxx, controller.target_psd_func)
+            level_fraction_clamped = float(np.clip(level_fraction, 0.0, 1.0))
+            if eq_adapt_level_threshold >= 1.0:
+                adapt_weight = 1.0 if level_fraction_clamped >= 1.0 else 0.0
+            else:
+                adapt_weight = (level_fraction_clamped - eq_adapt_level_threshold) / max(1.0 - eq_adapt_level_threshold, 1e-6)
+            adapt_weight = float(np.clip(adapt_weight, 0.0, 1.0))
+            if eq_adapt_level_power > 0.0 and adapt_weight > 0.0:
+                adapt_weight = adapt_weight ** eq_adapt_level_power
+            if adapt_weight < eq_adapt_min_weight:
+                adapt_weight = eq_adapt_min_weight
+
+            equalizer.update_gains(f, Pxx, controller.target_psd_func, adapt_weight=adapt_weight)
 
             # Update PI control
             level_fraction = controller.update_control(S_avg_meas, S_avg_target, level_fraction)

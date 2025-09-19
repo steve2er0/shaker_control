@@ -27,6 +27,21 @@ from PySide6.QtGui import QFont
 # Plotting imports
 import pyqtgraph as pg
 
+# Optional hardware imports
+try:
+    import nidaqmx
+    from nidaqmx.constants import (AcquisitionType, TerminalConfiguration, ExcitationSource,
+                                   AccelUnits, Coupling, VoltageUnits, AccelSensitivityUnits,
+                                   RegenerationMode, WAIT_INFINITELY)
+    from nidaqmx.errors import DaqError
+    from nidaqmx.stream_writers import AnalogSingleChannelWriter
+    from nidaqmx.stream_readers import AnalogSingleChannelReader
+    NIDAQMX_AVAILABLE = True
+except ImportError:
+    nidaqmx = None
+    DaqError = None
+    NIDAQMX_AVAILABLE = False
+
 # Import our existing modules
 import config
 from rv_controller import MultiBandEqualizer, RandomVibrationController, create_bandpass_filter, make_bandlimited_noise, apply_safety_limiters
@@ -62,11 +77,16 @@ class SharedConfig(QObject):
         self.eq_num_bands = config.EQ_NUM_BANDS
         self.eq_adapt_rate = config.EQ_ADAPT_RATE
         self.eq_smooth_factor = config.EQ_SMOOTH_FACTOR
+        self.eq_adapt_level_threshold = float(getattr(config, 'EQ_ADAPT_LEVEL_THRESHOLD', 0.4))
+        self.eq_adapt_level_power = float(getattr(config, 'EQ_ADAPT_LEVEL_POWER', 1.0))
+        self.eq_adapt_min_weight = float(getattr(config, 'EQ_ADAPT_MIN_WEIGHT', 0.0))
         
         # Safety limiters
         self.max_crest_factor = config.MAX_CREST_FACTOR
         self.max_rms_volts = config.MAX_RMS_VOLTS
         self.ao_volt_limit = config.AO_VOLT_LIMIT
+        self.accel_excitation_amps = getattr(config, 'ACCEL_EXCITATION_AMPS', 0.0)
+        self.sync_ao_clock = bool(getattr(config, 'AO_SYNC_WITH_AI', False))
         
         # Simulation mode
         self.simulation_mode = config.SIMULATION_MODE
@@ -78,6 +98,11 @@ class SharedConfig(QObject):
         self.input_channel_labels = list(labels)
         if not self.input_channel_labels:
             self.input_channel_labels = ["Control Accel"]
+        if not self.simulation_mode:
+            # Hardware mode currently drives a single control accelerometer channel
+            self.input_channel_labels = self.input_channel_labels[:1]
+            if not self.input_channel_labels:
+                self.input_channel_labels = ["Control Accel"]
         self.num_input_channels = len(self.input_channel_labels)
 
         # Real-time viewer tuning
@@ -760,6 +785,11 @@ class ControllerWorker(QObject):
     
     def run_controller(self):
         """Main controller loop running in separate thread"""
+        ao_task = None
+        ai_task = None
+        ai_reader = None
+        ao_writer = None
+        volts_to_g_scale = None
         try:
             self.is_running = True
             self.start_time = time.time()
@@ -794,23 +824,192 @@ class ControllerWorker(QObject):
             
             # Create bandpass filter
             bp = create_bandpass_filter(f1, f2, fs)
-            
-            # Create simulation system
-            ao_writer, ai_reader, ai_task, ao_task = create_simulation_system(
-                fs, self.shared_config.sim_plant_gain, config.SIM_RESONANCES, 
-                self.shared_config.sim_noise_level, config.SIM_DELAY_SAMPLES, 
-                config.SIM_NONLINEARITY, num_input_channels=self.shared_config.num_input_channels
-            )
-            
-            self.status_message.emit("Controller running...")
-            
+
+            # Initialize DAQ or simulation backend
+            simulation_mode = bool(self.shared_config.simulation_mode)
+            mode_label = "SIMULATION"
+
+            if not simulation_mode and not NIDAQMX_AVAILABLE:
+                self.status_message.emit("nidaqmx package not available; using simulation mode")
+                print("nidaqmx not available - falling back to simulation mode")
+                simulation_mode = True
+                self.shared_config.simulation_mode = True
+
+            if simulation_mode:
+                ao_writer, ai_reader, ai_task, ao_task = create_simulation_system(
+                    fs, self.shared_config.sim_plant_gain, config.SIM_RESONANCES,
+                    self.shared_config.sim_noise_level, config.SIM_DELAY_SAMPLES,
+                    config.SIM_NONLINEARITY, num_input_channels=self.shared_config.num_input_channels
+                )
+                plant_gain_g_per_V = self.shared_config.sim_plant_gain * 0.8
+                mode_label = "SIMULATION"
+            else:
+                try:
+                    device_ai = config.DEVICE_AI
+                    device_ao = config.DEVICE_AO
+                    accel_mV_per_g = config.ACCEL_MV_PER_G
+                    ao_volt_limit = self.shared_config.ao_volt_limit
+                    buf_samples = int(self.shared_config.fs * self.shared_config.buf_seconds)
+                    excitation_current = max(0.0, float(self.shared_config.accel_excitation_amps))
+                    excitation_source = ExcitationSource.INTERNAL if excitation_current > 0 else ExcitationSource.NONE
+
+                    ai_task = nidaqmx.Task()
+                    ao_task = nidaqmx.Task()
+
+                    try:
+                        ai_ch = ai_task.ai_channels.add_ai_accel_chan(
+                            physical_channel=device_ai,
+                            name_to_assign_to_channel="accel",
+                            terminal_config=TerminalConfiguration.PSEUDO_DIFF,
+                            min_val=-5.0,
+                            max_val=5.0,
+                            units=AccelUnits.G,
+                            sensitivity=accel_mV_per_g / 1000.0,
+                            sensitivity_units=AccelSensitivityUnits.MILLIVOLTS_PER_G,
+                            current_excit_source=excitation_source,
+                            current_excit_val=excitation_current,
+                        )
+                        volts_to_g_scale = None
+                        if excitation_current > 0:
+                            print(f"Hardware input configured for IEPE accelerometer mode ({excitation_current*1000:.2f} mA).")
+                        else:
+                            print("Hardware input configured for accelerometer without IEPE excitation.")
+                        try:
+                            ai_ch.ai_coupling = Coupling.AC
+                        except Exception:
+                            pass
+                    except Exception as accel_err:
+                        if DaqError is not None and not isinstance(accel_err, DaqError):
+                            raise
+                        print(f"Accelerometer channel init failed: {accel_err}. Falling back to voltage mode.")
+                        self.status_message.emit("Accel channel unavailable; using voltage mode")
+                        try:
+                            ai_task.close()
+                        except Exception:
+                            pass
+                        ai_task = nidaqmx.Task()
+                        voltage_range = max(2.0, ao_volt_limit * 2.0)
+                        ai_task.ai_channels.add_ai_voltage_chan(
+                            physical_channel=device_ai,
+                            name_to_assign_to_channel="accel_volts",
+                            terminal_config=TerminalConfiguration.PSEUDO_DIFF,
+                            min_val=-voltage_range,
+                            max_val=voltage_range,
+                            units=VoltageUnits.VOLTS,
+                        )
+                        volts_to_g_scale = 1.0 / max(accel_mV_per_g / 1000.0, 1e-9)
+                        print(f"Scaling voltage input by {volts_to_g_scale:.3f} to convert to g.")
+
+                    ai_task.timing.cfg_samp_clk_timing(
+                        rate=fs,
+                        sample_mode=AcquisitionType.CONTINUOUS,
+                        samps_per_chan=buf_samples,
+                    )
+                    try:
+                        desired_ai_buf = max(buf_samples * 4, ai_task.in_stream.input_buf_size)
+                        ai_task.in_stream.input_buf_size = desired_ai_buf
+                    except Exception:
+                        pass
+
+                    ao_task.ao_channels.add_ao_voltage_chan(
+                        physical_channel=device_ao,
+                        name_to_assign_to_channel="drive",
+                        min_val=-ao_volt_limit,
+                        max_val=ao_volt_limit,
+                        units=VoltageUnits.VOLTS,
+                    )
+                    ao_task.timing.cfg_samp_clk_timing(
+                        rate=fs,
+                        sample_mode=AcquisitionType.CONTINUOUS,
+                        samps_per_chan=buf_samples,
+                    )
+                    try:
+                        desired_ao_buf = max(buf_samples * 4, ao_task.out_stream.output_buf_size)
+                        ao_task.out_stream.output_buf_size = desired_ao_buf
+                    except Exception:
+                        pass
+
+                    if self.shared_config.sync_ao_clock:
+                        try:
+                            ao_task.timing.samp_clk_src = ai_task.timing.samp_clk_term
+                            ao_task.triggers.start_trigger.cfg_dig_edge_start_trig(
+                                ai_task.triggers.start_trigger.term
+                            )
+                        except Exception as sync_err:
+                            if DaqError is not None and not isinstance(sync_err, DaqError):
+                                raise
+                            print(f"AO sync configuration failed: {sync_err}. Using onboard clock.")
+                            self.status_message.emit("AO using onboard clock (not synchronized)")
+                            try:
+                                ao_task.triggers.start_trigger.disable()
+                            except Exception:
+                                pass
+                    else:
+                        print("AO synchronization disabled by configuration; using onboard clock.")
+
+                    ai_reader = AnalogSingleChannelReader(ai_task.in_stream)
+                    ao_writer = AnalogSingleChannelWriter(ao_task.out_stream, auto_start=False)
+
+                    ao_writer.write_many_sample(np.zeros(buf_samples))
+                    ai_task.start()
+                    ao_task.start()
+
+                    plant_gain_g_per_V = 1.0
+                    mode_label = "HARDWARE"
+                except Exception as hw_err:
+                    print(f"Hardware initialization failed: {hw_err}")
+                    self.status_message.emit(f"Hardware init failed: {hw_err}")
+                    if ao_task is not None:
+                        try:
+                            ao_task.stop()
+                        except Exception:
+                            pass
+                        try:
+                            ao_task.close()
+                        except Exception:
+                            pass
+                    if ai_task is not None:
+                        try:
+                            ai_task.stop()
+                        except Exception:
+                            pass
+                        try:
+                            ai_task.close()
+                        except Exception:
+                            pass
+                    ao_task = None
+                    ai_task = None
+                    volts_to_g_scale = None
+                    simulation_mode = True
+                    self.shared_config.simulation_mode = True
+                    ao_writer, ai_reader, ai_task, ao_task = create_simulation_system(
+                        fs, self.shared_config.sim_plant_gain, config.SIM_RESONANCES,
+                        self.shared_config.sim_noise_level, config.SIM_DELAY_SAMPLES,
+                        config.SIM_NONLINEARITY, num_input_channels=self.shared_config.num_input_channels
+                    )
+                    plant_gain_g_per_V = self.shared_config.sim_plant_gain * 0.8
+                    mode_label = "SIMULATION"
+
+            if ao_writer is None or ai_reader is None:
+                raise RuntimeError("Failed to initialize data acquisition path")
+
+            self.status_message.emit(f"Controller running ({mode_label.lower()})...")
+            print(f"Controller worker running in {mode_label.lower()} mode.")
+
             # Control loop variables
             level_fraction = self.shared_config.initial_level_fraction
-            plant_gain_g_per_V = self.shared_config.sim_plant_gain * 0.8
+            block_duration = block_samples / max(fs, 1e-9)
+            io_timeout = WAIT_INFINITELY if not simulation_mode else max(1.0, block_duration * 2.0)
+            loop_sleep = block_duration if simulation_mode else 0.0
+            adapt_threshold = float(getattr(self.shared_config, 'eq_adapt_level_threshold', 0.4))
+            adapt_power = float(max(0.0, getattr(self.shared_config, 'eq_adapt_level_power', 1.0)))
+            adapt_min_weight = float(np.clip(getattr(self.shared_config, 'eq_adapt_min_weight', 0.0), 0.0, 1.0))
+
             
             loop_count = 0
             while not self.should_stop.is_set():
                 loop_count += 1
+                loop_start = time.perf_counter()
                 current_time = time.time() - self.start_time
                 
                 # Debug logging every 10 seconds
@@ -842,14 +1041,28 @@ class ControllerWorker(QObject):
                                     self.shared_config.ao_volt_limit)
                 
                 # Simulate plant response
-                ao_writer.write_many_sample(volts_block)
+                if simulation_mode:
+                    ao_writer.write_many_sample(volts_block)
+                else:
+                    ao_writer.write_many_sample(volts_block, timeout=io_timeout)
                 if self.shared_config.num_input_channels > 1:
                     data = np.empty((self.shared_config.num_input_channels, block_samples), dtype=np.float64)
                 else:
                     data = np.empty(block_samples, dtype=np.float64)
-                ai_reader.read_many_sample(data, number_of_samples_per_channel=block_samples)
+                if simulation_mode:
+                    ai_reader.read_many_sample(data, number_of_samples_per_channel=block_samples)
+                else:
+                    ai_reader.read_many_sample(data, number_of_samples_per_channel=block_samples, timeout=io_timeout)
 
-                accel_data = data[0] if data.ndim == 2 else data
+                if volts_to_g_scale is not None:
+                    if data.ndim == 2:
+                        data[0, :] = data[0, :] * volts_to_g_scale
+                        accel_data = data[0]
+                    else:
+                        data *= volts_to_g_scale
+                        accel_data = data
+                else:
+                    accel_data = data[0] if data.ndim == 2 else data
                 
                 # Estimate PSD
                 f, Pxx, metrics = controller.estimate_psd(accel_data)
@@ -866,7 +1079,18 @@ class ControllerWorker(QObject):
                     plant_gain_g_per_V = 0.8*plant_gain_g_per_V + 0.2*new_gain
                 
                 # Update equalizer
-                equalizer.update_gains(f, Pxx, controller.target_psd_func)
+                level_fraction_clamped = float(np.clip(level_fraction, 0.0, 1.0))
+                if adapt_threshold >= 1.0:
+                    adapt_weight = 1.0 if level_fraction_clamped >= 1.0 else 0.0
+                else:
+                    adapt_weight = (level_fraction_clamped - adapt_threshold) / max(1.0 - adapt_threshold, 1e-6)
+                adapt_weight = float(np.clip(adapt_weight, 0.0, 1.0))
+                if adapt_power > 0.0 and adapt_weight > 0.0:
+                    adapt_weight = adapt_weight ** adapt_power
+                if adapt_weight < adapt_min_weight:
+                    adapt_weight = adapt_min_weight
+
+                equalizer.update_gains(f, Pxx, controller.target_psd_func, adapt_weight=adapt_weight)
                 
                 # Update control
                 level_fraction = controller.update_control(S_avg_meas, S_avg_target, level_fraction)
@@ -898,8 +1122,14 @@ class ControllerWorker(QObject):
                 if loop_count % 50 == 0:  # Every ~5 seconds
                     print(f"Debug: Emitting data at {current_time:.1f}s, RMS={np.std(accel_data):.4f}")
                 
-                # Small delay to prevent overwhelming the GUI
-                time.sleep(0.1)
+                # Pace the loop based on execution environment
+                if simulation_mode:
+                    if loop_sleep > 0:
+                        time.sleep(loop_sleep)
+                else:
+                    remaining = block_duration - (time.perf_counter() - loop_start)
+                    if remaining > 0:
+                        time.sleep(remaining)
                 
         except Exception as e:
             print(f"Debug: Exception in control loop at {time.time() - self.start_time:.1f}s: {e}")
@@ -907,6 +1137,17 @@ class ControllerWorker(QObject):
             traceback.print_exc()
             self.status_message.emit(f"Error: {e}")
         finally:
+            for task in (ao_task, ai_task):
+                if task is None:
+                    continue
+                try:
+                    task.stop()
+                except Exception:
+                    pass
+                try:
+                    task.close()
+                except Exception:
+                    pass
             self.is_running = False
             self.status_message.emit("Controller stopped")
     
@@ -1047,3 +1288,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

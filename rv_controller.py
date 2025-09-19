@@ -92,44 +92,48 @@ class MultiBandEqualizer:
             
         return equalized_signal
     
-    def update_gains(self, f_measured, psd_measured, target_psd_func):
-        """Update equalizer gains based on measured vs target PSD"""
+    def update_gains(self, f_measured, psd_measured, target_psd_func, adapt_weight=1.0):
+        """Update equalizer gains based on measured vs target PSD."""
+        adapt_weight = float(np.clip(adapt_weight, 0.0, 1.0))
+        if adapt_weight <= 0.0:
+            return
+
         target_psd = target_psd_func(f_measured)
-        
+
         # Calculate gain adjustments for each band
         new_gains = self.gains.copy()
-        
+        effective_adapt = self.adapt_rate * adapt_weight
+
         for i in range(self.num_bands):
             # Find frequencies in this band
             band_mask = (f_measured >= self.band_edges[i]) & (f_measured < self.band_edges[i + 1])
-            
+
             if not np.any(band_mask):
                 continue
-                
+
             # Get measured and target PSD in this band
             psd_meas_band = psd_measured[band_mask]
             psd_target_band = target_psd[band_mask]
-            
+
             # Skip if no valid target data in this band
             valid_target = ~np.isnan(psd_target_band)
             if not np.any(valid_target):
                 continue
-                
+
             # Calculate average ratio (target/measured) for this band
             avg_measured = np.mean(psd_meas_band[valid_target])
             avg_target = np.mean(psd_target_band[valid_target])
-            
+
             if avg_measured > 1e-12:  # Avoid division by zero
                 desired_gain_adjustment = np.sqrt(avg_target / avg_measured)
-                
-                # Apply adaptation rate
-                gain_update = 1.0 + self.adapt_rate * (desired_gain_adjustment - 1.0)
+
+                # Apply adaptation rate scaled by current weight
+                gain_update = 1.0 + effective_adapt * (desired_gain_adjustment - 1.0)
                 new_gains[i] *= gain_update
-                
+
         # Apply smoothing and limits
         self.gains = self.smooth_factor * self.gains + (1 - self.smooth_factor) * new_gains
         self.gains = np.clip(self.gains, self.gain_limits[0], self.gain_limits[1])
-    
     def get_band_info(self):
         """Return band information for plotting/debugging"""
         return {
@@ -423,3 +427,4 @@ def apply_safety_limiters(signal, max_cf=4.0, max_rms=1.5, cf_soft_knee=0.8, rms
     }
     
     return signal_final, limiter_stats
+

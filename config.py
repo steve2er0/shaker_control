@@ -7,7 +7,8 @@ Modify these parameters to customize your system behavior.
 # ============= HARDWARE CONFIGURATION =============
 DEVICE_AI = "Dev1/ai0"
 DEVICE_AO = "Dev1/ao0"
-ACCEL_MV_PER_G = 100.0      # Accelerometer sensitivity [mV/g]
+ACCEL_MV_PER_G = 100000.0      # Accelerometer sensitivity [mV/g]
+ACCEL_EXCITATION_AMPS = 2.1e-3  # IEPE excitation current [A], set 0 for external
 AO_VOLT_LIMIT = 2.5         # Absolute max AO voltage magnitude [V]
 
 # Input channel labels for visualization (order matches DAQ wiring)
@@ -19,31 +20,34 @@ INPUT_CHANNEL_LABELS = [
 ]
 
 # ============= SYSTEM PARAMETERS =============
-FS = 4096.0                # Sample rate [Hz]
-BUF_SECONDS = 5.0           # Buffer size for AO/AI streaming
-BLOCK_SECONDS = 2.0         # Processing block duration
-WELCH_NPERSEG = 2048        # Welch segment length (power of 2)
+FS = 51200.0                # Sample rate [Hz]
+BUF_SECONDS = 1.0           # Buffer size for AO/AI streaming
+BLOCK_SECONDS = 1.0         # Processing block duration
+WELCH_NPERSEG = 51200        # Welch segment length (power of 2)
 
 # ============= TARGET PSD PROFILE =============
 # List of (frequency [Hz], PSD level [g^2/Hz]) pairs
 TARGET_PSD_POINTS = [
-    (20.0, 0.01),     # 2.5e-3 g^2/Hz
-    (80.0, 0.04),       # 1e-2 g^2/Hz  
-    (800.0, 0.04),      # 1e-2 g^2/Hz
-    (2000.0, 0.01)    # 2.5e-3 g^2/Hz
+    (20.0, 0.001),     # 2.5e-3 g^2/Hz
+    (80.0, 0.004),       # 1e-2 g^2/Hz  
+    (800.0, 0.004),      # 1e-2 g^2/Hz
+    (2000.0, 0.001)    # 2.5e-3 g^2/Hz
 ]
 
 # ============= CONTROL PARAMETERS =============
 INITIAL_LEVEL_FRACTION = 0.1    # Start at 100% of target
-MAX_LEVEL_FRACTION_RATE = 0.5   # Max change in level per second
-KP = 2.0                        # Proportional gain
-KI = 0.5                        # Integral gain
+MAX_LEVEL_FRACTION_RATE = 1   # Max change in level per second
+KP = 2                        # Proportional gain
+KI = 1                        # Integral gain
 
 # ============= EQUALIZER PARAMETERS =============
 EQ_NUM_BANDS = 36               # Number of frequency bands
 EQ_GAIN_LIMITS = (0.00001, 10.0)   # Min/max gain per band
 EQ_ADAPT_RATE = 0.5             # Adaptation rate
 EQ_SMOOTH_FACTOR = 0.9          # Smoothing factor
+EQ_ADAPT_LEVEL_THRESHOLD = 0.4  # Level fraction before full EQ adaptation
+EQ_ADAPT_LEVEL_POWER = 1.0      # Exponent applied to level gating (1.0 = linear)
+EQ_ADAPT_MIN_WEIGHT = 0.0       # Minimum adaptation weight even below threshold
 
 # ============= SAFETY LIMITERS =============
 MAX_CREST_FACTOR = 6.0          # Maximum peak/RMS ratio
@@ -52,7 +56,7 @@ CREST_SOFT_KNEE = 0.8           # Soft limiting threshold
 RMS_LIMIT_HEADROOM = 0.9        # Headroom when limiting
 
 # ============= SIMULATION MODE =============
-SIMULATION_MODE = True          # Set to False for real hardware
+SIMULATION_MODE = False          # Set to False for real hardware
 
 # Simulation parameters (only used when SIMULATION_MODE = True)
 SIM_PLANT_GAIN = 4.0           # Base plant gain [g/V]
@@ -71,3 +75,7 @@ CONSOLE_UPDATE_INTERVAL = 5.0  # Console output interval [seconds]
 
 # Real-time viewer tuning
 REALTIME_PSD_UPDATE_STRIDE = 5  # Compute PSD for response channels every N blocks
+
+
+AO_SYNC_WITH_AI = False      # Attempt to share AI sample clock with AO
+
