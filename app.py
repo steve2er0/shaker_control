@@ -356,6 +356,7 @@ class ControllerTab(QWidget):
         self.eq_plot.setLabel('bottom', 'Frequency', units='Hz')
         self.eq_plot.showGrid(x=True, y=True)
         self.eq_plot.setYRange(0.1, 10.0)
+        self.eq_plot.setXRange(10, 3000)  # Set frequency range to match control band
         
         # Equalizer bar graph (will be updated with data)
         self.eq_bargraph = None
@@ -429,6 +430,12 @@ class ControllerTab(QWidget):
                 bar_widths = freq_centers * width_factor
                 self.eq_bargraph = pg.BarGraphItem(x=freq_centers, height=gains, width=bar_widths, brush='b')
                 self.eq_plot.addItem(self.eq_bargraph)
+                
+                # Ensure proper frequency range is set after adding data
+                if len(freq_centers) > 0:
+                    freq_min = min(freq_centers) * 0.8
+                    freq_max = max(freq_centers) * 1.2
+                    self.eq_plot.setXRange(freq_min, freq_max)
             else:
                 # Update existing bar graph
                 self.eq_bargraph.setOpts(height=gains)
