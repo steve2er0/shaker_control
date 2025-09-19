@@ -27,10 +27,6 @@ from PySide6.QtGui import QFont
 # Plotting imports
 import pyqtgraph as pg
 
-# Set PyQtGraph to use light theme
-pg.setConfigOption('background', 'w')  # White background
-pg.setConfigOption('foreground', 'k')  # Black foreground
-
 # Import our existing modules
 import config
 from rv_controller import MultiBandEqualizer, RandomVibrationController, create_bandpass_filter, make_bandlimited_noise, apply_safety_limiters
@@ -329,6 +325,10 @@ class ControllerTab(QWidget):
         self.psd_plot.showGrid(x=True, y=True)
         self.psd_plot.setXRange(np.log10(10), np.log10(3000))  # 10 to 3000 Hz
         
+        # Set axis formatting: X-axis regular, Y-axis scientific
+        self.psd_plot.getAxis('bottom').enableAutoSIPrefix(False)  # Disable scientific notation on X
+        self.psd_plot.getAxis('left').enableAutoSIPrefix(True)   # Enable scientific notation on Y
+        
         # PSD curves
         self.psd_measured_curve = self.psd_plot.plot(pen='b', name='Measured PSD')
         self.psd_target_curve = self.psd_plot.plot(pen='r', style='--', name='Target PSD')
@@ -345,7 +345,9 @@ class ControllerTab(QWidget):
         
         # Control metric curves
         self.rms_curve = self.metrics_plot.plot(pen='g', name='a_rms [g]')
-        self.level_curve = self.metrics_plot.plot(pen='b', name='Level Fraction')
+        self.savg_meas_curve = self.metrics_plot.plot(pen='b', name='S_avg meas')
+        self.savg_target_curve = self.metrics_plot.plot(pen='b', style='--', name='S_avg target')
+        self.level_curve = self.metrics_plot.plot(pen='c', name='Level Fraction')
         self.sat_curve = self.metrics_plot.plot(pen='r', name='Saturation %')
         self.plant_gain_curve = self.metrics_plot.plot(pen='m', name='Plant Gain [g/V]')
         self.metrics_plot.addLegend()
@@ -361,6 +363,12 @@ class ControllerTab(QWidget):
         self.eq_plot.showGrid(x=True, y=True)
         self.eq_plot.setYRange(0.1, 10.0)
         self.eq_plot.setXRange(np.log10(10), np.log10(3000))  # 10 to 3000 Hz
+        
+        # Set axis formatting: X-axis regular, Y-axis regular (gains don't need scientific)
+        self.eq_plot.getAxis('bottom').enableAutoSIPrefix(False)  # Disable scientific notation on X
+        
+        # Add unity gain reference line
+        self.eq_plot.addLine(y=1.0, pen=pg.mkPen('gray', style=pg.QtCore.Qt.DashLine))
         
         # Equalizer bar graph (will be updated with data)
         self.eq_bargraph = None
@@ -402,12 +410,16 @@ class ControllerTab(QWidget):
             a_rms, s_avg_meas, s_avg_target, level_fraction, sat_frac, plant_gain = metrics_data
             
             self.rms_data.append(a_rms)
+            self.savg_meas_data.append(s_avg_meas)
+            self.savg_target_data.append(s_avg_target)
             self.level_data.append(level_fraction)
             self.sat_data.append(sat_frac * 100)  # Convert to percentage
             self.plant_gain_data.append(plant_gain)
             
             # Update curves
             self.rms_curve.setData(list(self.time_data), list(self.rms_data))
+            self.savg_meas_curve.setData(list(self.time_data), list(self.savg_meas_data))
+            self.savg_target_curve.setData(list(self.time_data), list(self.savg_target_data))
             self.level_curve.setData(list(self.time_data), list(self.level_data))
             self.sat_curve.setData(list(self.time_data), list(self.sat_data))
             self.plant_gain_curve.setData(list(self.time_data), list(self.plant_gain_data))
