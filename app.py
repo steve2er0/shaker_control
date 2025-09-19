@@ -512,8 +512,10 @@ class RealTimeDataTab(QWidget):
         self.streaming_time = deque()
         self.start_time = time.time()
         
-        # Data storage for PSD calculation
-        self.psd_data_buffer = deque(maxlen=int(8192))  # Buffer for PSD calculation
+        # PSD data from controller (will be updated via signal)
+        self.psd_frequencies = None
+        self.psd_averaged = None
+        self.psd_target = None
         
         # Streaming state
         self.is_streaming = False
@@ -554,14 +556,22 @@ class RealTimeDataTab(QWidget):
         self.plot_widget.nextRow()
         
         # PSD plot
-        self.psd_plot = self.plot_widget.addPlot(title="Control Accelerometer PSD")
-        self.psd_plot.setLogMode(x=True, y=True)
+        self.psd_plot = self.plot_widget.addPlot(title="Averaged PSD from Controller")
+        self.psd_plot.setLogMode(x=False, y=True)
         self.psd_plot.setLabel('left', 'PSD [g²/Hz]')
         self.psd_plot.setLabel('bottom', 'Frequency [Hz]')
         self.psd_plot.showGrid(x=True, y=True)
+        # Lock PSD x-axis to 20–2000 Hz and prevent x auto-ranging
+        self.psd_plot.setXRange(20.0, 2000.0, padding=0)
+        vb_psd = self.psd_plot.getViewBox()
+        vb_psd.setLimits(xMin=20.0, xMax=2000.0)
+        vb_psd.setAutoVisible(x=False, y=True)
+        self.psd_plot.enableAutoRange(x=False, y=True)
         
-        # PSD curve
-        self.psd_curve = self.psd_plot.plot(pen='b', name='Control PSD')
+        # PSD curves
+        self.psd_averaged_curve = self.psd_plot.plot(pen='g', name='Averaged PSD')
+        self.psd_target_curve = self.psd_plot.plot(pen='r', style='--', name='Target PSD')
+        self.psd_plot.addLegend()
         
         layout.addWidget(self.plot_widget)
         self.setLayout(layout)
@@ -572,7 +582,11 @@ class RealTimeDataTab(QWidget):
         self.start_time = time.time()
         self.streaming_data.clear()
         self.streaming_time.clear()
-        self.psd_data_buffer.clear()
+        
+        # Clear PSD data
+        self.psd_frequencies = None
+        self.psd_averaged = None
+        self.psd_target = None
         
         # Start update timer (must be called from main thread)
         if not self.update_timer.isActive():
@@ -600,9 +614,6 @@ class RealTimeDataTab(QWidget):
         self.streaming_time.append(current_time)
         self.streaming_data.append(acceleration_value)
         
-        # Also add to PSD buffer
-        self.psd_data_buffer.append(acceleration_value)
-        
         # Remove old data outside time window
         while self.streaming_time and (current_time - self.streaming_time[0]) > self.max_time_window:
             self.streaming_time.popleft()
@@ -620,19 +631,41 @@ class RealTimeDataTab(QWidget):
         # Update time domain plot
         self.realtime_curve.setData(list(self.streaming_time), list(self.streaming_data))
         
-        # Update PSD plot if we have enough data
-        if len(self.psd_data_buffer) > 1024:  # Need enough data for meaningful PSD
+        # Update PSD plot with data from controller
+        if self.psd_frequencies is not None and self.psd_averaged is not None:
             try:
-                # Calculate PSD of buffered data
-                fs = self.shared_config.fs
-                data_array = np.array(list(self.psd_data_buffer))
-                
-                # Use Welch method for PSD
-                f, Pxx = welch(data_array, fs=fs, nperseg=min(1024, len(data_array)//4), 
-                              noverlap=None, detrend='constant')
-                
-                # Update PSD plot
-                self.psd_curve.setData(f, Pxx)
+                # Sanitize frequency axis for log scale: finite and > 0
+                f = np.asarray(self.psd_frequencies, dtype=float)
+                mask_base = np.isfinite(f) & (f > 0)
+
+                # Clip to display band [20, 2000] Hz
+                f = f[mask_base]
+                if f.size == 0:
+                    return
+                band_mask = (f >= 20.0) & (f <= 2000.0)
+
+                # Apply masks to arrays with matching length
+                def _apply_mask(arr, mask):
+                    arr = np.asarray(arr)
+                    if arr.shape == f.shape:
+                        return arr[mask]
+                    return arr
+
+                f_plot = f[band_mask]
+                psd_avg_plot = _apply_mask(self.psd_averaged[mask_base], band_mask)
+                psd_target_plot = _apply_mask(self.psd_target[mask_base] if self.psd_target is not None else None, band_mask) if self.psd_target is not None else None
+
+                # For log-y plots, only plot positive finite PSD values
+                if psd_avg_plot is not None:
+                    valid_avg = np.isfinite(psd_avg_plot) & (psd_avg_plot > 0)
+                    self.psd_averaged_curve.setData(f_plot[valid_avg], psd_avg_plot[valid_avg])
+                if psd_target_plot is not None:
+                    valid_target = np.isfinite(psd_target_plot) & (psd_target_plot > 0)
+                    if np.any(valid_target):
+                        self.psd_target_curve.setData(f_plot[valid_target], psd_target_plot[valid_target])
+
+                # Re-enforce fixed x-range after updates
+                self.psd_plot.setXRange(20.0, 2000.0, padding=0)
                 
             except Exception:
                 pass  # Skip PSD update if calculation fails
@@ -647,6 +680,19 @@ class RealTimeDataTab(QWidget):
             if self.streaming_time:
                 self.time_plot.setXRange(max(0, self.streaming_time[-1] - self.max_time_window), 
                                         self.streaming_time[-1])
+    
+    def update_psd_data(self, psd_data):
+        """Update PSD data from controller"""
+        if len(psd_data) == 4:  # New format with averaged PSD
+            f, psd_measured, psd_target, psd_averaged = psd_data
+            self.psd_frequencies = f
+            self.psd_averaged = psd_averaged
+            self.psd_target = psd_target
+        else:  # Legacy format without averaged PSD
+            f, psd_measured, psd_target = psd_data
+            self.psd_frequencies = f
+            self.psd_averaged = psd_measured  # Use measured as fallback
+            self.psd_target = psd_target
 
 
 class ControllerWorker(QObject):
@@ -886,6 +932,7 @@ class MainWindow(QMainWindow):
             
             # Reconnect signals for new worker
             self.controller_worker.psd_data_ready.connect(self.handle_psd_data)
+            self.controller_worker.psd_data_ready.connect(self.realtime_tab.update_psd_data)
             self.controller_worker.metrics_data_ready.connect(self.handle_metrics_data)
             self.controller_worker.eq_data_ready.connect(self.handle_eq_data)
             self.controller_worker.realtime_data_ready.connect(
