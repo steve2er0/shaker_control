@@ -323,6 +323,11 @@ class ControllerTab(QWidget):
         self.psd_plot.setLabel('left', 'PSD [g²/Hz]')
         self.psd_plot.setLabel('bottom', 'Frequency [Hz]')
         self.psd_plot.showGrid(x=True, y=True)
+        self.psd_plot.setXRange(np.log10(10), np.log10(2500))  # 10 to 2500 Hz
+        
+        # Set axis formatting: X-axis normal, Y-axis scientific notation
+        self.psd_plot.getAxis('bottom').enableAutoSIPrefix(False)  # Disable scientific notation on X
+        self.psd_plot.getAxis('left').enableAutoSIPrefix(True)   # Enable scientific notation on Y
         
         # PSD curves
         self.psd_measured_curve = self.psd_plot.plot(pen='b', name='Measured PSD')
