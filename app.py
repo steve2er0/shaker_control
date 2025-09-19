@@ -360,13 +360,13 @@ class ControllerTab(QWidget):
         self.eq_plot.setLogMode(x=True, y=False)
         
         # Set X-axis range for proper display
-        self.eq_plot.setXRange(10, 3000)
+        self.eq_plot.setXRange(10, 2500)
         
         # Disable auto-scaling to prevent range from being overwritten
         self.eq_plot.getViewBox().setAutoVisible(x=False, y=False)
         
         # Create custom tick values for the log axis
-        tick_values = [10, 20, 50, 100, 200, 500, 1000, 2000, 3000]
+        tick_values = [10, 20, 50, 100, 200, 500, 1000, 2000, 2500]
         tick_strings = [str(int(v)) for v in tick_values]
         ticks = [(v, str(int(v))) for v in tick_values]
         self.eq_plot.getAxis('bottom').setTicks([ticks])
