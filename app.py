@@ -324,10 +324,6 @@ class ControllerTab(QWidget):
         self.psd_plot.setLabel('bottom', 'Frequency [Hz]')
         self.psd_plot.showGrid(x=True, y=True)
         
-        # Set X-axis range to 10-2500 Hz
-        self.psd_plot.setXRange(10, 2500)
-        self.psd_plot.getViewBox().setAutoVisible(x=False, y=True)
-        
         # PSD curves
         self.psd_measured_curve = self.psd_plot.plot(pen='b', name='Measured PSD')
         self.psd_target_curve = self.psd_plot.plot(pen='r', style='--', name='Target PSD')
@@ -355,27 +351,20 @@ class ControllerTab(QWidget):
         
         # Equalizer plot
         self.eq_plot = self.plot_widget.addPlot(title="Equalizer Gains")
+        self.eq_plot.setLogMode(x=True, y=False)
         self.eq_plot.setLabel('left', 'Gain')
-        self.eq_plot.setLabel('bottom', 'Frequency', units='Hz')
+        self.eq_plot.setLabel('bottom', 'Frequency [Hz]')
         self.eq_plot.showGrid(x=True, y=True)
         self.eq_plot.setYRange(0.1, 10.0)
-        
-        # Configure log mode for X axis
-        self.eq_plot.setLogMode(x=True, y=False)
-        
-        # Set X-axis range for proper display
-        self.eq_plot.setXRange(10, 2500)
-        
-        # Disable auto-scaling to prevent range from being overwritten
-        self.eq_plot.getViewBox().setAutoVisible(x=False, y=False)
-        
-        # Create custom tick values for the log axis
-        tick_values = [10, 20, 50, 100, 200, 500, 1000, 2000, 2500]
-        tick_strings = [str(int(v)) for v in tick_values]
-        ticks = [(v, str(int(v))) for v in tick_values]
-        self.eq_plot.getAxis('bottom').setTicks([ticks])
-        
-        # Equalizer bar graph (will be updated with data)
+
+        # HARD LOCK the visible x-range to 20–2000 Hz (log-safe)
+        self.eq_xmin, self.eq_xmax = 20.0, 2000.0
+        self.eq_plot.setXRange(self.eq_xmin, self.eq_xmax, padding=0)
+        vb = self.eq_plot.getViewBox()
+        vb.setLimits(xMin=self.eq_xmin, xMax=self.eq_xmax)   # prevent pans/zooms beyond limits
+        vb.setAutoVisible(x=False, y=False)                  # disable auto-rescale
+
+        # Equalizer bar graph (will be created with data)
         self.eq_bargraph = None
         
         layout.addWidget(self.plot_widget)
@@ -434,24 +423,44 @@ class ControllerTab(QWidget):
         # Update equalizer plot
         if eq_data:
             freq_centers, gains = eq_data
-            if self.eq_bargraph is None:
-                # Create bar graph with narrow bars for many bands
-                num_bands = len(freq_centers)
-                if num_bands > 20:
-                    width_factor = 0.1  # Very narrow for many bands
-                elif num_bands > 12:
-                    width_factor = 0.2  # Narrow for moderate bands
-                else:
-                    width_factor = 0.3  # Normal width for few bands
-                
-                bar_widths = freq_centers * width_factor
-                self.eq_bargraph = pg.BarGraphItem(x=freq_centers, height=gains, width=bar_widths, brush='b')
-                self.eq_plot.addItem(self.eq_bargraph)
-                
-                # Keep the fixed range - don't override it dynamically
+
+            # Sanitize: keep only finite, >0 freqs; clip to [20, 2000] Hz
+            freq_centers = np.asarray(freq_centers, dtype=float)
+            gains = np.asarray(gains, dtype=float)
+
+            mask = np.isfinite(freq_centers) & (freq_centers > 0) & np.isfinite(gains)
+            freq_centers = freq_centers[mask]
+            gains = gains[mask]
+
+            # Convert rad/s -> Hz if values are clearly too large
+            if freq_centers.size and np.nanmedian(freq_centers) > 1e5:
+                freq_centers = freq_centers / (2*np.pi)
+
+            # Clip to display band
+            freq_centers = np.clip(freq_centers, self.eq_xmin, self.eq_xmax)
+
+            if freq_centers.size == 0:
+                return
+
+            # Bar widths proportional to center frequency
+            num_bands = len(freq_centers)
+            if num_bands > 20:
+                width_factor = 0.10
+            elif num_bands > 12:
+                width_factor = 0.20
             else:
-                # Update existing bar graph
-                self.eq_bargraph.setOpts(height=gains)
+                width_factor = 0.30
+            bar_widths = freq_centers * width_factor
+
+            if self.eq_bargraph is None:
+                self.eq_bargraph = pg.BarGraphItem(x=freq_centers, height=gains,
+                                                   width=bar_widths, brush='b')
+                self.eq_plot.addItem(self.eq_bargraph)
+            else:
+                self.eq_bargraph.setOpts(x=freq_centers, height=gains, width=bar_widths)
+
+            # Keep the x-range locked
+            self.eq_plot.setXRange(self.eq_xmin, self.eq_xmax, padding=0)
 
 
 class RealTimeDataTab(QWidget):
@@ -515,10 +524,6 @@ class RealTimeDataTab(QWidget):
         self.psd_plot.setLabel('left', 'PSD [g²/Hz]')
         self.psd_plot.setLabel('bottom', 'Frequency [Hz]')
         self.psd_plot.showGrid(x=True, y=True)
-        
-        # Set X-axis range to 10-2500 Hz
-        self.psd_plot.setXRange(10, 2500)
-        self.psd_plot.getViewBox().setAutoVisible(x=False, y=True)
         
         # PSD curve
         self.psd_curve = self.psd_plot.plot(pen='b', name='Control PSD')
