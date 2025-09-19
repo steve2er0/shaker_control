@@ -358,6 +358,9 @@ class ControllerTab(QWidget):
         self.eq_plot.setYRange(0.1, 10.0)
         self.eq_plot.setXRange(10, 3000)  # Set frequency range to match control band
         
+        # Disable auto-scaling to prevent range from being overwritten
+        self.eq_plot.getViewBox().setAutoVisible(x=False, y=False)
+        
         # Equalizer bar graph (will be updated with data)
         self.eq_bargraph = None
         
@@ -420,6 +423,8 @@ class ControllerTab(QWidget):
             # Debug: Print frequency range to diagnose axis issue
             if len(freq_centers) > 0:
                 print(f"EQ Debug: freq_centers range: {min(freq_centers):.1f} - {max(freq_centers):.1f} Hz")
+                print(f"EQ Debug: freq_centers values: {freq_centers[:5]}... (first 5)")
+                print(f"EQ Debug: gains values: {gains[:5]}... (first 5)")
             if self.eq_bargraph is None:
                 # Create bar graph with narrow bars for many bands
                 num_bands = len(freq_centers)
@@ -438,7 +443,10 @@ class ControllerTab(QWidget):
                 if len(freq_centers) > 0:
                     freq_min = min(freq_centers) * 0.8
                     freq_max = max(freq_centers) * 1.2
-                    self.eq_plot.setXRange(freq_min, freq_max)
+                    print(f"EQ Debug: Setting X range to {freq_min:.1f} - {freq_max:.1f} Hz")
+                    # Force the range setting and disable auto-scaling
+                    self.eq_plot.setXRange(freq_min, freq_max, padding=0)
+                    self.eq_plot.getViewBox().setAutoVisible(x=False, y=False)
             else:
                 # Update existing bar graph
                 self.eq_bargraph.setOpts(height=gains)
