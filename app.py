@@ -323,21 +323,11 @@ class ControllerTab(QWidget):
         self.psd_plot.setLabel('left', 'PSD [g²/Hz]')
         self.psd_plot.setLabel('bottom', 'Frequency [Hz]')
         self.psd_plot.showGrid(x=True, y=True)
-        self.psd_plot.setXRange(np.log10(10), np.log10(2500))  # 10 to 2500 Hz
-        
-        # Set axis formatting: X-axis normal, Y-axis scientific notation
-        # For log mode plots, we need to configure the axis formatting differently
-        self.psd_plot.getAxis('bottom').setTicks(None)  # Let PyQtGraph handle X-axis formatting
-        self.psd_plot.getAxis('left').setTicks(None)    # Let PyQtGraph handle Y-axis formatting
-        
-        # Force scientific notation on Y-axis by setting tick format
-        from PyQt6.QtCore import QLocale
-        self.psd_plot.getAxis('left').setTickFormat(lambda x, p: f"{x:.2e}")
-        self.psd_plot.getAxis('bottom').setTickFormat(lambda x, p: f"{x:.0f}")
         
         # PSD curves
         self.psd_measured_curve = self.psd_plot.plot(pen='b', name='Measured PSD')
         self.psd_target_curve = self.psd_plot.plot(pen='r', style='--', name='Target PSD')
+        self.psd_averaged_curve = self.psd_plot.plot(pen='g', name='Averaged PSD')
         self.psd_plot.addLegend()
         
         # Next row - Control metrics
@@ -392,8 +382,14 @@ class ControllerTab(QWidget):
         
         # Update PSD plot
         if psd_data:
-            f, psd_measured, psd_target = psd_data
-            self.psd_measured_curve.setData(f, psd_measured)
+            if len(psd_data) == 4:  # New format with averaged PSD
+                f, psd_measured, psd_target, psd_averaged = psd_data
+                self.psd_measured_curve.setData(f, psd_measured)
+                self.psd_averaged_curve.setData(f, psd_averaged)
+            else:  # Legacy format without averaged PSD
+                f, psd_measured, psd_target = psd_data
+                self.psd_measured_curve.setData(f, psd_measured)
+            
             if psd_target is not None:
                 valid_target = ~np.isnan(psd_target)
                 if np.any(valid_target):
@@ -596,6 +592,10 @@ class ControllerWorker(QObject):
         self.shared_config = shared_config
         self.should_stop = Event()
         self.is_running = False
+        
+        # PSD averaging
+        self.psd_averaged = None
+        self.psd_alpha = 0.1  # Exponential averaging factor
     
     def run_controller(self):
         """Main controller loop running in separate thread"""
@@ -700,7 +700,14 @@ class ControllerWorker(QObject):
                 
                 # Emit data for GUI updates
                 psd_target = controller.target_psd_func(f)
-                self.psd_data_ready.emit((f, Pxx, psd_target))
+                
+                # Calculate averaged PSD (exponential smoothing)
+                if self.psd_averaged is None:
+                    self.psd_averaged = Pxx.copy()
+                else:
+                    self.psd_averaged = self.psd_alpha * Pxx + (1 - self.psd_alpha) * self.psd_averaged
+                
+                self.psd_data_ready.emit((f, Pxx, psd_target, self.psd_averaged))
                 
                 self.metrics_data_ready.emit((a_rms_meas, S_avg_meas, S_avg_target, 
                                            level_fraction, sat_frac, plant_gain_g_per_V))
