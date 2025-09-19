@@ -351,17 +351,25 @@ class ControllerTab(QWidget):
         
         # Equalizer plot
         self.eq_plot = self.plot_widget.addPlot(title="Equalizer Gains")
-        self.eq_plot.setLogMode(x=True, y=False)
         self.eq_plot.setLabel('left', 'Gain')
         self.eq_plot.setLabel('bottom', 'Frequency', units='Hz')
         self.eq_plot.showGrid(x=True, y=True)
         self.eq_plot.setYRange(0.1, 10.0)
+        
+        # Configure log mode for X axis
+        self.eq_plot.setLogMode(x=True, y=False)
         
         # Set X-axis range for proper display
         self.eq_plot.setXRange(10, 3000)
         
         # Disable auto-scaling to prevent range from being overwritten
         self.eq_plot.getViewBox().setAutoVisible(x=False, y=False)
+        
+        # Create custom tick values for the log axis
+        tick_values = [10, 20, 50, 100, 200, 500, 1000, 2000, 3000]
+        tick_strings = [str(int(v)) for v in tick_values]
+        ticks = [(v, str(int(v))) for v in tick_values]
+        self.eq_plot.getAxis('bottom').setTicks([ticks])
         
         # Equalizer bar graph (will be updated with data)
         self.eq_bargraph = None
