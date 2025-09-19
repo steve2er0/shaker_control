@@ -34,6 +34,8 @@ TARGET_PSD_POINTS = [
     (1000.0, 0.001)    # 2.5e-3 g^2/Hz
 ]
 
+# === Add
+
 # ============= CONTROL PARAMETERS =============
 INITIAL_LEVEL_FRACTION = 0.1    # Start at 100% of target
 MAX_LEVEL_FRACTION_RATE = 1   # Max change in level per second
