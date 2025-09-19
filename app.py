@@ -323,6 +323,7 @@ class ControllerTab(QWidget):
         self.psd_plot.setLabel('left', 'PSD [g²/Hz]')
         self.psd_plot.setLabel('bottom', 'Frequency [Hz]')
         self.psd_plot.showGrid(x=True, y=True)
+        self.psd_plot.setXRange(10, 2500)  # Set frequency range 10-2500 Hz
         
         # PSD curves
         self.psd_measured_curve = self.psd_plot.plot(pen='b', name='Measured PSD')
@@ -517,6 +518,7 @@ class RealTimeDataTab(QWidget):
         self.psd_plot.setLabel('left', 'PSD [g²/Hz]')
         self.psd_plot.setLabel('bottom', 'Frequency [Hz]')
         self.psd_plot.showGrid(x=True, y=True)
+        self.psd_plot.setXRange(10, 2500)  # Set frequency range 10-2500 Hz
         
         # PSD curve
         self.psd_curve = self.psd_plot.plot(pen='b', name='Control PSD')
