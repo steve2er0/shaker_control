@@ -320,8 +320,8 @@ class ControllerTab(QWidget):
         # PSD plot
         self.psd_plot = self.plot_widget.addPlot(title="Power Spectral Density")
         self.psd_plot.setLogMode(x=True, y=True)
-        self.psd_plot.setLabel('left', 'PSD', units='g²/Hz')
-        self.psd_plot.setLabel('bottom', 'Frequency', units='Hz')
+        self.psd_plot.setLabel('left', 'PSD [g²/Hz]')
+        self.psd_plot.setLabel('bottom', 'Frequency [Hz]')
         self.psd_plot.showGrid(x=True, y=True)
         
         # PSD curves
@@ -485,8 +485,8 @@ class RealTimeDataTab(QWidget):
         # PSD plot
         self.psd_plot = self.plot_widget.addPlot(title="Control Accelerometer PSD")
         self.psd_plot.setLogMode(x=True, y=True)
-        self.psd_plot.setLabel('left', 'PSD', units='g²/Hz')
-        self.psd_plot.setLabel('bottom', 'Frequency', units='Hz')
+        self.psd_plot.setLabel('left', 'PSD [g²/Hz]')
+        self.psd_plot.setLabel('bottom', 'Frequency [Hz]')
         self.psd_plot.showGrid(x=True, y=True)
         
         # PSD curve
