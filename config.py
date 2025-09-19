@@ -10,6 +10,14 @@ DEVICE_AO = "Dev1/ao0"
 ACCEL_MV_PER_G = 100.0      # Accelerometer sensitivity [mV/g]
 AO_VOLT_LIMIT = 2.5         # Absolute max AO voltage magnitude [V]
 
+# Input channel labels for visualization (order matches DAQ wiring)
+INPUT_CHANNEL_LABELS = [
+    "Control Accel",
+    "Response 1",
+    "Response 2",
+    "Response 3",
+]
+
 # ============= SYSTEM PARAMETERS =============
 FS = 4096.0                # Sample rate [Hz]
 BUF_SECONDS = 5.0           # Buffer size for AO/AI streaming
@@ -60,3 +68,6 @@ SIM_NONLINEARITY = 0.05        # Nonlinearity factor (0 = linear)
 PLOT_SMOOTH_ALPHA = 0.3        # PSD smoothing factor
 PLOT_UPDATE_EVERY = 1         # Update plots every N cycles
 CONSOLE_UPDATE_INTERVAL = 5.0  # Console output interval [seconds]
+
+# Real-time viewer tuning
+REALTIME_PSD_UPDATE_STRIDE = 5  # Compute PSD for response channels every N blocks

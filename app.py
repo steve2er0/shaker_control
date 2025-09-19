@@ -21,7 +21,7 @@ from scipy.signal import welch
 from PySide6.QtWidgets import (QApplication, QMainWindow, QTabWidget, QVBoxLayout, 
                               QHBoxLayout, QWidget, QFormLayout, QDoubleSpinBox, 
                               QSpinBox, QPushButton, QCheckBox, QLabel, QGroupBox)
-from PySide6.QtCore import QTimer, Signal, QObject, QThread
+from PySide6.QtCore import QTimer, Signal, QObject, QThread, Qt
 from PySide6.QtGui import QFont
 
 # Plotting imports
@@ -72,6 +72,16 @@ class SharedConfig(QObject):
         self.simulation_mode = config.SIMULATION_MODE
         self.sim_plant_gain = config.SIM_PLANT_GAIN
         self.sim_noise_level = config.SIM_NOISE_LEVEL
+
+        # Input channel metadata
+        labels = getattr(config, "INPUT_CHANNEL_LABELS", ["Control Accel"])
+        self.input_channel_labels = list(labels)
+        if not self.input_channel_labels:
+            self.input_channel_labels = ["Control Accel"]
+        self.num_input_channels = len(self.input_channel_labels)
+
+        # Real-time viewer tuning
+        self.realtime_psd_update_stride = int(getattr(config, "REALTIME_PSD_UPDATE_STRIDE", 5))
 
 
 class ConfigurationTab(QWidget):
@@ -504,18 +514,23 @@ class RealTimeDataTab(QWidget):
     def __init__(self, shared_config):
         super().__init__()
         self.shared_config = shared_config
+        self.fs = float(self.shared_config.fs)
+        self.channel_labels = list(self.shared_config.input_channel_labels)
+        self.num_channels = max(1, self.shared_config.num_input_channels)
+        self.welch_nperseg = int(getattr(self.shared_config, 'welch_nperseg', config.WELCH_NPERSEG))
+        self.psd_update_stride = max(1, int(getattr(self.shared_config, 'realtime_psd_update_stride', 5)))
         self.init_ui()
         
-        # Data storage for streaming
-        self.max_time_window = 10.0  # 10 seconds
-        self.streaming_data = deque()
-        self.streaming_time = deque()
-        self.start_time = time.time()
-        
+        # Data storage for RMS history
+        self.history_length = 300
+        self.update_indices = deque(maxlen=self.history_length)
+        self.rms_history = [deque(maxlen=self.history_length) for _ in range(self.num_channels)]
+        self.update_count = 0
+
         # PSD data from controller (will be updated via signal)
-        self.psd_frequencies = None
-        self.psd_averaged = None
         self.psd_target = None
+        self.psd_latest = [None] * self.num_channels  # (f, Pxx) per channel
+        self._psd_dirty = False
         
         # Streaming state
         self.is_streaming = False
@@ -543,14 +558,18 @@ class RealTimeDataTab(QWidget):
         # Create plot widget with two plots
         self.plot_widget = pg.GraphicsLayoutWidget()
         
-        # Time domain plot
-        self.time_plot = self.plot_widget.addPlot(title="Real-Time Acceleration Data")
-        self.time_plot.setLabel('left', 'Acceleration', units='g')
-        self.time_plot.setLabel('bottom', 'Time', units='s')
-        self.time_plot.showGrid(x=True, y=True)
-        
-        # Time domain curve
-        self.realtime_curve = self.time_plot.plot(pen='g', name='Acceleration')
+        # RMS history plot
+        self.rms_plot = self.plot_widget.addPlot(title="Channel g-RMS History")
+        self.rms_plot.setLabel('left', 'g-RMS [g]')
+        self.rms_plot.setLabel('bottom', 'Update Index')
+        self.rms_plot.showGrid(x=True, y=True)
+        self.rms_plot.addLegend()
+        self.rms_curves = []
+        for idx, label in enumerate(self.channel_labels):
+            color = pg.intColor(idx, hues=max(1, self.num_channels))
+            pen = pg.mkPen(color=color, width=2)
+            curve = self.rms_plot.plot(pen=pen, name=label)
+            self.rms_curves.append(curve)
         
         # Next row - PSD plot
         self.plot_widget.nextRow()
@@ -562,16 +581,21 @@ class RealTimeDataTab(QWidget):
         self.psd_plot.setLabel('bottom', 'Frequency [Hz]')
         self.psd_plot.showGrid(x=True, y=True)
         # Lock PSD x-axis to 20–2000 Hz and prevent x auto-ranging
-        self.psd_plot.setXRange(20.0, 2000.0, padding=0)
         vb_psd = self.psd_plot.getViewBox()
-        vb_psd.setLimits(xMin=20.0, xMax=2000.0)
         vb_psd.setAutoVisible(x=False, y=True)
         self.psd_plot.enableAutoRange(x=False, y=True)
+        self.psd_plot.setLimits(xMin=20.0, xMax=2000.0)
+        self.psd_plot.setRange(xRange=(20.0, 2000.0), padding=0)
         
-        # PSD curves
-        self.psd_averaged_curve = self.psd_plot.plot(pen='g', name='Averaged PSD')
-        self.psd_target_curve = self.psd_plot.plot(pen='r', style='--', name='Target PSD')
         self.psd_plot.addLegend()
+        self.psd_curves = []
+        for idx, label in enumerate(self.channel_labels):
+            color = pg.intColor(idx, hues=max(1, self.num_channels))
+            pen = pg.mkPen(color=color, width=1.8)
+            curve = self.psd_plot.plot(pen=pen, name=f"{label} PSD")
+            self.psd_curves.append(curve)
+        target_pen = pg.mkPen(color='r', style=Qt.DashLine, width=2)
+        self.psd_target_curve = self.psd_plot.plot(pen=target_pen, name='Target PSD')
         
         layout.addWidget(self.plot_widget)
         self.setLayout(layout)
@@ -579,13 +603,14 @@ class RealTimeDataTab(QWidget):
     def start_streaming(self):
         """Start real-time data streaming"""
         self.is_streaming = True
-        self.start_time = time.time()
-        self.streaming_data.clear()
-        self.streaming_time.clear()
-        
+        self.update_indices.clear()
+        for history in self.rms_history:
+            history.clear()
+        self.update_count = 0
+        self.psd_latest = [None] * self.num_channels
+        self._psd_dirty = False
+
         # Clear PSD data
-        self.psd_frequencies = None
-        self.psd_averaged = None
         self.psd_target = None
         
         # Start update timer (must be called from main thread)
@@ -600,99 +625,117 @@ class RealTimeDataTab(QWidget):
         self.update_timer.stop()
     
     def add_data_point(self, acceleration_value):
-        """Add new data point to streaming plot"""
+        """Add new block of data to the streaming plot"""
         if not self.is_streaming:
             return
-        
-        current_time = time.time() - self.start_time
-        
-        # Debug logging for data reception
-        if len(self.streaming_data) % 100 == 0:  # Every 100 data points
-            print(f"Debug: Received data point at {current_time:.1f}s, value={acceleration_value:.4f}")
-        
-        # Add new data
-        self.streaming_time.append(current_time)
-        self.streaming_data.append(acceleration_value)
-        
-        # Remove old data outside time window
-        while self.streaming_time and (current_time - self.streaming_time[0]) > self.max_time_window:
-            self.streaming_time.popleft()
-            self.streaming_data.popleft()
-    
+
+        block = np.asarray(acceleration_value, dtype=float)
+        if block.ndim == 1:
+            block = block[np.newaxis, :]
+        if block.shape[0] != self.num_channels:
+            print(f"Debug: Received block with {block.shape[0]} channels, expected {self.num_channels}")
+            return
+
+        n_samples = block.shape[1]
+        if n_samples == 0:
+            return
+
+        # Update RMS history for each channel
+        rms_values = np.sqrt(np.mean(block ** 2, axis=1))
+        self.update_count += 1
+        self.update_indices.append(self.update_count)
+        for ch_idx, value in enumerate(rms_values):
+            self.rms_history[ch_idx].append(float(value))
+
+        compute_psd = (self.update_count == 1) or (self.update_count % self.psd_update_stride == 0)
+        if compute_psd:
+            for ch_idx in range(1, self.num_channels):
+                try:
+                    f_vals, Pxx = welch(block[ch_idx], fs=self.fs, nperseg=self.welch_nperseg)
+                    self.psd_latest[ch_idx] = (f_vals, Pxx)
+                    self._psd_dirty = True
+                except Exception:
+                    continue
+
     def update_streaming_plot(self):
         """Update the streaming plot display"""
-        if not self.is_streaming or not self.streaming_time:
+        if not self.is_streaming or not self.update_indices:
             return
         
-        # Debug logging for plot updates
-        if len(self.streaming_data) % 200 == 0:  # Every 200 data points
-            print(f"Debug: Updating streaming plot with {len(self.streaming_data)} points")
-        
-        # Update time domain plot
-        self.realtime_curve.setData(list(self.streaming_time), list(self.streaming_data))
-        
-        # Update PSD plot with data from controller
-        if self.psd_frequencies is not None and self.psd_averaged is not None:
+        x_vals = list(self.update_indices)
+        for curve, channel_history in zip(self.rms_curves, self.rms_history):
+            curve.setData(x_vals, list(channel_history))
+
+        # Update PSD plot with latest channel PSD estimates when data changed
+        if self._psd_dirty and any(entry is not None for entry in self.psd_latest):
             try:
-                # Sanitize frequency axis for log scale: finite and > 0
-                f = np.asarray(self.psd_frequencies, dtype=float)
-                mask_base = np.isfinite(f) & (f > 0)
+                for ch_idx, curve in enumerate(self.psd_curves):
+                    psd_entry = self.psd_latest[ch_idx]
+                    if psd_entry is None:
+                        curve.clear()
+                        continue
+                    f_vals, Pxx = psd_entry
+                    f_vals = np.asarray(f_vals, dtype=float)
+                    Pxx = np.asarray(Pxx, dtype=float)
+                    mask = np.isfinite(f_vals) & (f_vals > 0)
+                    f_vals = f_vals[mask]
+                    Pxx = Pxx[mask]
+                    if f_vals.size == 0:
+                        curve.clear()
+                        continue
+                    band_mask = (f_vals >= 20.0) & (f_vals <= 2000.0)
+                    f_band = f_vals[band_mask]
+                    p_band = Pxx[band_mask]
+                    if f_band.size == 0:
+                        curve.clear()
+                        continue
+                    valid = np.isfinite(p_band) & (p_band > 0)
+                    if np.any(valid):
+                        curve.setData(f_band[valid], p_band[valid])
+                    else:
+                        curve.clear()
 
-                # Clip to display band [20, 2000] Hz
-                f = f[mask_base]
-                if f.size == 0:
-                    return
-                band_mask = (f >= 20.0) & (f <= 2000.0)
-
-                # Apply masks to arrays with matching length
-                def _apply_mask(arr, mask):
-                    arr = np.asarray(arr)
-                    if arr.shape == f.shape:
-                        return arr[mask]
-                    return arr
-
-                f_plot = f[band_mask]
-                psd_avg_plot = _apply_mask(self.psd_averaged[mask_base], band_mask)
-                psd_target_plot = _apply_mask(self.psd_target[mask_base] if self.psd_target is not None else None, band_mask) if self.psd_target is not None else None
-
-                # For log-y plots, only plot positive finite PSD values
-                if psd_avg_plot is not None:
-                    valid_avg = np.isfinite(psd_avg_plot) & (psd_avg_plot > 0)
-                    self.psd_averaged_curve.setData(f_plot[valid_avg], psd_avg_plot[valid_avg])
-                if psd_target_plot is not None:
-                    valid_target = np.isfinite(psd_target_plot) & (psd_target_plot > 0)
-                    if np.any(valid_target):
-                        self.psd_target_curve.setData(f_plot[valid_target], psd_target_plot[valid_target])
+                if self.psd_target is not None:
+                    f_target, S_target = self.psd_target
+                    f_target = np.asarray(f_target, dtype=float)
+                    S_target = np.asarray(S_target, dtype=float)
+                    mask = np.isfinite(f_target) & (f_target > 0) & np.isfinite(S_target) & (S_target > 0)
+                    if np.any(mask):
+                        self.psd_target_curve.setData(f_target[mask], S_target[mask])
+                    else:
+                        self.psd_target_curve.clear()
 
                 # Re-enforce fixed x-range after updates
-                self.psd_plot.setXRange(20.0, 2000.0, padding=0)
+                self.psd_plot.setRange(xRange=(20.0, 2000.0), padding=0)
                 
             except Exception:
                 pass  # Skip PSD update if calculation fails
-        
-        # Autoscaling for time domain
-        if self.autoscale_check.isChecked() and self.streaming_data:
-            y_min = min(self.streaming_data)
-            y_max = max(self.streaming_data)
+            finally:
+                self._psd_dirty = False
+
+        # Autoscaling for RMS history
+        if self.autoscale_check.isChecked():
+            populated = [np.asarray(history, dtype=float) for history in self.rms_history if history]
+            if populated:
+                y_min = min(arr.min() for arr in populated)
+                y_max = max(arr.max() for arr in populated)
+            else:
+                y_min, y_max = -1.0, 1.0
             margin = (y_max - y_min) * 0.1 if y_max != y_min else 0.1
-            self.time_plot.setYRange(y_min - margin, y_max + margin)
-            
-            if self.streaming_time:
-                self.time_plot.setXRange(max(0, self.streaming_time[-1] - self.max_time_window), 
-                                        self.streaming_time[-1])
+            self.rms_plot.setYRange(y_min - margin, y_max + margin)
+            self.rms_plot.setXRange(max(0, self.update_indices[0]), self.update_indices[-1])
     
     def update_psd_data(self, psd_data):
         """Update PSD data from controller"""
         if len(psd_data) == 4:  # New format with averaged PSD
             f, psd_measured, psd_target, psd_averaged = psd_data
-            self.psd_frequencies = f
-            self.psd_averaged = psd_averaged
-            self.psd_target = psd_target
+            self.psd_latest[0] = (f, psd_averaged)
+            self.psd_target = (f, psd_target)
         else:  # Legacy format without averaged PSD
             f, psd_measured, psd_target = psd_data
-            self.psd_frequencies = f
-            self.psd_averaged = psd_measured  # Use measured as fallback
-            self.psd_target = psd_target
+            self.psd_latest[0] = (f, psd_measured)
+            self.psd_target = (f, psd_target)
+        self._psd_dirty = True
 
 
 class ControllerWorker(QObject):
@@ -702,7 +745,7 @@ class ControllerWorker(QObject):
     psd_data_ready = Signal(object)  # (f, psd_measured, psd_target)
     metrics_data_ready = Signal(object)  # (a_rms, s_avg_meas, s_avg_target, level_fraction, sat_frac, plant_gain)
     eq_data_ready = Signal(object)  # (freq_centers, gains)
-    realtime_data_ready = Signal(float)  # acceleration value
+    realtime_data_ready = Signal(object)  # streaming block of acceleration data
     status_message = Signal(str)
     
     def __init__(self, shared_config):
@@ -756,7 +799,7 @@ class ControllerWorker(QObject):
             ao_writer, ai_reader, ai_task, ao_task = create_simulation_system(
                 fs, self.shared_config.sim_plant_gain, config.SIM_RESONANCES, 
                 self.shared_config.sim_noise_level, config.SIM_DELAY_SAMPLES, 
-                config.SIM_NONLINEARITY
+                config.SIM_NONLINEARITY, num_input_channels=self.shared_config.num_input_channels
             )
             
             self.status_message.emit("Controller running...")
@@ -800,11 +843,16 @@ class ControllerWorker(QObject):
                 
                 # Simulate plant response
                 ao_writer.write_many_sample(volts_block)
-                data = np.empty(block_samples, dtype=np.float64)
+                if self.shared_config.num_input_channels > 1:
+                    data = np.empty((self.shared_config.num_input_channels, block_samples), dtype=np.float64)
+                else:
+                    data = np.empty(block_samples, dtype=np.float64)
                 ai_reader.read_many_sample(data, number_of_samples_per_channel=block_samples)
+
+                accel_data = data[0] if data.ndim == 2 else data
                 
                 # Estimate PSD
-                f, Pxx, metrics = controller.estimate_psd(data)
+                f, Pxx, metrics = controller.estimate_psd(accel_data)
                 if metrics is None:
                     print(f"Debug: PSD estimation returned None at {time.time() - self.start_time:.1f}s")
                     continue
@@ -843,12 +891,12 @@ class ControllerWorker(QObject):
                 eq_info = equalizer.get_band_info()
                 self.eq_data_ready.emit((eq_info['centers'], eq_info['gains']))
                 
-                # Emit real-time data point (use RMS of current block)
-                self.realtime_data_ready.emit(np.std(data))
-                
+                # Emit current block for real-time visualization
+                self.realtime_data_ready.emit(np.array(data, copy=True))
+
                 # Debug logging for data emission
                 if loop_count % 50 == 0:  # Every ~5 seconds
-                    print(f"Debug: Emitting data at {current_time:.1f}s, RMS={np.std(data):.4f}")
+                    print(f"Debug: Emitting data at {current_time:.1f}s, RMS={np.std(accel_data):.4f}")
                 
                 # Small delay to prevent overwhelming the GUI
                 time.sleep(0.1)

@@ -8,7 +8,7 @@ This module provides:
 """
 
 import numpy as np
-from scipy.signal import sosfilt, butter
+from scipy.signal import sosfilt, butter, cont2discrete
 import time
 
 
@@ -91,19 +91,92 @@ class MockAnalogSingleChannelWriter:
 
 
 class MockAnalogSingleChannelReader:
-    def __init__(self, plant_simulator):
+    def __init__(self, plant_simulator, num_channels=1):
         self.plant_sim = plant_simulator
-    
+        self.num_channels = max(1, int(num_channels))
+        self.dt = 1.0 / self.plant_sim.fs
+        self._sdof_filters = []
+        for idx in range(self.num_channels):
+            if idx == 0:
+                self._sdof_filters.append(None)
+                continue
+            damping = 0.05 + 0.03 * idx
+            gain = 0.8 + 0.4 * idx
+            b_d, a_d = self._design_sdof_filter(freq_hz=200.0, damping=damping)
+            state = {
+                'b': b_d,
+                'a': a_d,
+                'u_hist': np.zeros(len(b_d) - 1, dtype=float),
+                'y_hist': np.zeros(len(a_d) - 1, dtype=float),
+                'gain': gain,
+                'noise_scale': (idx + 1) * 0.1 * self.plant_sim.noise_level
+            }
+            self._sdof_filters.append(state)
+
+    def _design_sdof_filter(self, freq_hz, damping):
+        omega_n = 2 * np.pi * freq_hz
+        num = [omega_n ** 2]
+        den = [1.0, 2.0 * damping * omega_n, omega_n ** 2]
+        b_d, a_d, _ = cont2discrete((num, den), self.dt, method='bilinear')
+        b_d = b_d.flatten()
+        a_d = a_d.flatten()
+        if not np.isclose(a_d[0], 1.0):
+            b_d = b_d / a_d[0]
+            a_d = a_d / a_d[0]
+        return b_d, a_d
+
+    def _apply_sdof(self, input_signal, filt_state):
+        b = filt_state['b']
+        a = filt_state['a']
+        u_hist = filt_state['u_hist']
+        y_hist = filt_state['y_hist']
+        gain = filt_state['gain']
+
+        output = np.empty_like(input_signal)
+        for n, u_n in enumerate(input_signal):
+            acc = b[0] * u_n
+            if len(b) > 1:
+                acc += np.dot(b[1:], u_hist)
+            if len(a) > 1:
+                acc -= np.dot(a[1:], y_hist)
+
+            y_n = acc
+            output[n] = y_n * gain
+
+            # Update histories (simple shift register)
+            if len(u_hist) > 0:
+                u_hist[1:] = u_hist[:-1]
+                u_hist[0] = u_n
+            if len(y_hist) > 0:
+                y_hist[1:] = y_hist[:-1]
+                y_hist[0] = y_n
+
+        return output
+
     def read_many_sample(self, data_array, number_of_samples_per_channel, timeout=10.0):
         # Get the last written AO data and simulate plant response
         if hasattr(mock_ao_writer, 'last_data') and mock_ao_writer.last_data is not None:
             simulated_response = self.plant_sim.process(mock_ao_writer.last_data)
-            # Copy to the provided array
+        else:
+            simulated_response = np.random.randn(number_of_samples_per_channel) * 0.01
+
+        if simulated_response.size < number_of_samples_per_channel:
+            pad = number_of_samples_per_channel - simulated_response.size
+            simulated_response = np.pad(simulated_response, (0, pad), mode='edge')
+
+        if np.ndim(data_array) == 1:
             data_array[:] = simulated_response[:len(data_array)]
         else:
-            # No AO data yet, return realistic background noise to avoid NaN issues
-            # Use higher noise level to ensure meaningful startup data
-            data_array[:] = np.random.randn(len(data_array)) * 0.01  # 10x higher initial noise
+            n_channels = data_array.shape[0]
+            n_samples = min(number_of_samples_per_channel, data_array.shape[1])
+            base = simulated_response[:n_samples]
+            data_array[0, :n_samples] = base
+            for ch in range(1, n_channels):
+                filt_state = self._sdof_filters[ch]
+                response = self._apply_sdof(base[:n_samples], filt_state)
+                noise = np.random.randn(n_samples) * filt_state['noise_scale']
+                data_array[ch, :n_samples] = response + noise
+
         # Simulate read timing
         time.sleep(0.001)
 
@@ -173,7 +246,7 @@ mock_ai_reader = None
 
 
 def create_simulation_system(fs, sim_plant_gain, sim_resonances, sim_noise_level, 
-                           sim_delay_samples, sim_nonlinearity):
+                           sim_delay_samples, sim_nonlinearity, num_input_channels=1):
     """Create and initialize the simulation system"""
     global mock_ao_writer, mock_ai_reader
     
@@ -184,6 +257,6 @@ def create_simulation_system(fs, sim_plant_gain, sim_resonances, sim_noise_level
     
     # Create mock objects
     mock_ao_writer = MockAnalogSingleChannelWriter()
-    mock_ai_reader = MockAnalogSingleChannelReader(plant_sim)
+    mock_ai_reader = MockAnalogSingleChannelReader(plant_sim, num_channels=num_input_channels)
     
     return mock_ao_writer, mock_ai_reader, MockTask(), MockTask()
