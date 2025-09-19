@@ -323,11 +323,6 @@ class ControllerTab(QWidget):
         self.psd_plot.setLabel('left', 'PSD [g²/Hz]')
         self.psd_plot.setLabel('bottom', 'Frequency [Hz]')
         self.psd_plot.showGrid(x=True, y=True)
-        self.psd_plot.setXRange(np.log10(10), np.log10(3000))  # 10 to 3000 Hz
-        
-        # Set axis formatting: X-axis regular, Y-axis scientific
-        self.psd_plot.getAxis('bottom').enableAutoSIPrefix(False)  # Disable scientific notation on X
-        self.psd_plot.getAxis('left').enableAutoSIPrefix(True)   # Enable scientific notation on Y
         
         # PSD curves
         self.psd_measured_curve = self.psd_plot.plot(pen='b', name='Measured PSD')
@@ -345,9 +340,7 @@ class ControllerTab(QWidget):
         
         # Control metric curves
         self.rms_curve = self.metrics_plot.plot(pen='g', name='a_rms [g]')
-        self.savg_meas_curve = self.metrics_plot.plot(pen='b', name='S_avg meas')
-        self.savg_target_curve = self.metrics_plot.plot(pen='b', style='--', name='S_avg target')
-        self.level_curve = self.metrics_plot.plot(pen='c', name='Level Fraction')
+        self.level_curve = self.metrics_plot.plot(pen='b', name='Level Fraction')
         self.sat_curve = self.metrics_plot.plot(pen='r', name='Saturation %')
         self.plant_gain_curve = self.metrics_plot.plot(pen='m', name='Plant Gain [g/V]')
         self.metrics_plot.addLegend()
@@ -359,16 +352,9 @@ class ControllerTab(QWidget):
         self.eq_plot = self.plot_widget.addPlot(title="Equalizer Gains")
         self.eq_plot.setLogMode(x=True, y=False)
         self.eq_plot.setLabel('left', 'Gain')
-        self.eq_plot.setLabel('bottom', 'Frequency [Hz]')
+        self.eq_plot.setLabel('bottom', 'Frequency', units='Hz')
         self.eq_plot.showGrid(x=True, y=True)
         self.eq_plot.setYRange(0.1, 10.0)
-        self.eq_plot.setXRange(np.log10(10), np.log10(3000))  # 10 to 3000 Hz
-        
-        # Set axis formatting: X-axis regular, Y-axis regular (gains don't need scientific)
-        self.eq_plot.getAxis('bottom').enableAutoSIPrefix(False)  # Disable scientific notation on X
-        
-        # Add unity gain reference line
-        self.eq_plot.addLine(y=1.0, pen=pg.mkPen('gray', style=pg.QtCore.Qt.DashLine))
         
         # Equalizer bar graph (will be updated with data)
         self.eq_bargraph = None
@@ -410,16 +396,12 @@ class ControllerTab(QWidget):
             a_rms, s_avg_meas, s_avg_target, level_fraction, sat_frac, plant_gain = metrics_data
             
             self.rms_data.append(a_rms)
-            self.savg_meas_data.append(s_avg_meas)
-            self.savg_target_data.append(s_avg_target)
             self.level_data.append(level_fraction)
             self.sat_data.append(sat_frac * 100)  # Convert to percentage
             self.plant_gain_data.append(plant_gain)
             
             # Update curves
             self.rms_curve.setData(list(self.time_data), list(self.rms_data))
-            self.savg_meas_curve.setData(list(self.time_data), list(self.savg_meas_data))
-            self.savg_target_curve.setData(list(self.time_data), list(self.savg_target_data))
             self.level_curve.setData(list(self.time_data), list(self.level_data))
             self.sat_curve.setData(list(self.time_data), list(self.sat_data))
             self.plant_gain_curve.setData(list(self.time_data), list(self.plant_gain_data))
@@ -428,25 +410,17 @@ class ControllerTab(QWidget):
         if eq_data:
             freq_centers, gains = eq_data
             if self.eq_bargraph is None:
-                # Create bar graph with proper width for log scale
+                # Create bar graph with narrow bars for many bands
                 num_bands = len(freq_centers)
-                
-                # Calculate bar widths in log space for better visibility
-                log_freqs = np.log10(freq_centers)
-                if len(log_freqs) > 1:
-                    # Use average log spacing for bar width
-                    avg_log_spacing = np.mean(np.diff(log_freqs))
-                    # Convert back to linear space for bar width
-                    bar_widths = freq_centers * (10**avg_log_spacing - 1) * 0.8  # 80% of spacing
+                if num_bands > 20:
+                    width_factor = 0.1  # Very narrow for many bands
+                elif num_bands > 12:
+                    width_factor = 0.2  # Narrow for moderate bands
                 else:
-                    bar_widths = freq_centers * 0.3
+                    width_factor = 0.3  # Normal width for few bands
                 
-                # Ensure minimum width for visibility
-                min_width = freq_centers * 0.1
-                bar_widths = np.maximum(bar_widths, min_width)
-                
-                self.eq_bargraph = pg.BarGraphItem(x=freq_centers, height=gains, width=bar_widths, 
-                                                 brush='steelblue', pen='darkblue')
+                bar_widths = freq_centers * width_factor
+                self.eq_bargraph = pg.BarGraphItem(x=freq_centers, height=gains, width=bar_widths, brush='b')
                 self.eq_plot.addItem(self.eq_bargraph)
             else:
                 # Update existing bar graph
@@ -529,8 +503,9 @@ class RealTimeDataTab(QWidget):
         self.streaming_time.clear()
         self.psd_data_buffer.clear()
         
-        # Start update timer
-        self.update_timer.start()
+        # Start update timer (must be called from main thread)
+        if not self.update_timer.isActive():
+            self.update_timer.start()
     
     def stop_streaming(self):
         """Stop real-time data streaming"""
@@ -785,33 +760,20 @@ class MainWindow(QMainWindow):
     def start_controller(self):
         """Start the controller in a separate thread"""
         if self.controller_worker is None or not self.controller_worker.is_running:
-            # Stop and cleanup any existing thread first
-            if hasattr(self, 'controller_thread') and self.controller_thread is not None:
-                if self.controller_thread.isRunning():
-                    self.controller_thread.quit()
-                    self.controller_thread.wait(1000)
-            
             # Create new thread each time (Qt requirement)
             self.controller_thread = QThread()
             self.controller_worker = ControllerWorker(self.shared_config)
             self.controller_worker.moveToThread(self.controller_thread)
             
-            # Connect signals for new worker (use Qt.QueuedConnection for thread safety)
+            # Reconnect signals for new worker
             self.controller_worker.psd_data_ready.connect(
-                lambda data: self.controller_tab.update_plots(psd_data=data), 
-                type=pg.QtCore.Qt.QueuedConnection)
+                lambda data: self.controller_tab.update_plots(psd_data=data))
             self.controller_worker.metrics_data_ready.connect(
-                lambda data: self.controller_tab.update_plots(metrics_data=data),
-                type=pg.QtCore.Qt.QueuedConnection)
+                lambda data: self.controller_tab.update_plots(metrics_data=data))
             self.controller_worker.eq_data_ready.connect(
-                lambda data: self.controller_tab.update_plots(eq_data=data),
-                type=pg.QtCore.Qt.QueuedConnection)
+                lambda data: self.controller_tab.update_plots(eq_data=data))
             self.controller_worker.realtime_data_ready.connect(
-                self.realtime_tab.add_data_point,
-                type=pg.QtCore.Qt.QueuedConnection)
-            
-            # Connect thread finished signal for cleanup
-            self.controller_thread.finished.connect(self.controller_thread.deleteLater)
+                self.realtime_tab.add_data_point)
             
             # Connect thread start to worker
             self.controller_thread.started.connect(self.controller_worker.run_controller)
@@ -821,33 +783,36 @@ class MainWindow(QMainWindow):
             
             # Update controller tab UI
             self.controller_tab.start_controller()
-            # Also start real-time data viewer
+            # Start real-time data viewer from main thread
             self.realtime_tab.start_streaming()
     
     def stop_controller(self):
         """Stop the controller"""
-        if hasattr(self, 'controller_worker') and self.controller_worker and self.controller_worker.is_running:
+        if hasattr(self, 'controller_worker') and self.controller_worker.is_running:
             self.controller_worker.stop()
             
-            # Update UI first
-            self.controller_tab.stop_controller()
+            # Stop real-time data viewer first (from main thread)
             self.realtime_tab.stop_streaming()
             
             # Wait for thread to finish
-            if hasattr(self, 'controller_thread') and self.controller_thread:
+            if hasattr(self, 'controller_thread'):
                 self.controller_thread.quit()
                 self.controller_thread.wait(2000)  # Wait up to 2 seconds
+            
+            # Update controller tab UI
+            self.controller_tab.stop_controller()
     
     def closeEvent(self, event):
         """Handle application close"""
+        # Stop real-time data viewer first
+        self.realtime_tab.stop_streaming()
+        
         # Stop controller worker
-        if hasattr(self, 'controller_worker') and self.controller_worker and self.controller_worker.is_running:
+        if self.controller_worker and self.controller_worker.is_running:
             self.controller_worker.stop()
-            
-        # Clean up thread
-        if hasattr(self, 'controller_thread') and self.controller_thread:
-            self.controller_thread.quit()
-            self.controller_thread.wait(3000)  # Wait up to 3 seconds
+            if self.controller_thread:
+                self.controller_thread.quit()
+                self.controller_thread.wait(3000)  # Wait up to 3 seconds
         
         event.accept()
 
@@ -860,9 +825,6 @@ def main():
     app.setApplicationName("Random Vibration Control")
     app.setApplicationVersion("1.0")
     app.setOrganizationName("Vibration Testing Systems")
-    
-    # Use light theme (default Qt theme)
-    app.setStyle('Fusion')  # Clean, light theme
     
     # Create and show main window
     window = MainWindow()
