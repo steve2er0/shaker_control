@@ -1,6 +1,9 @@
 # Data logging output
 data_logs/
 
+# Sine sweep configuration files
+1g_sine_sweep_config.txt
+
 # Python cache files
 __pycache__/
 *.py[cod]
