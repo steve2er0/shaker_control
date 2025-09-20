@@ -386,6 +386,10 @@ class ConfigurationTab(QWidget):
         mode_layout.addRow("Mode:", self.test_mode_combo)
         mode_group.setLayout(mode_layout)
 
+        # Data logging toggle
+        self.data_log_check = QCheckBox("Enable Data Logging")
+        mode_layout.addRow("Logging:", self.data_log_check)
+
         # Control Parameters Group
         control_group = QGroupBox("Control Parameters")
         control_layout = QFormLayout()
@@ -574,6 +578,8 @@ class ConfigurationTab(QWidget):
         self.sine_initial_level_spin.setValue(self.shared_config.sine_initial_level)
         self.sine_max_level_rate_spin.setValue(self.shared_config.sine_max_level_rate)
 
+        self.data_log_check.setChecked(self.shared_config.data_log_enabled)
+
         self._update_mode_group_state()
 
     def apply_config(self):
@@ -609,6 +615,8 @@ class ConfigurationTab(QWidget):
         self.shared_config.sine_repeat = self.sine_repeat_check.isChecked()
         self.shared_config.sine_initial_level = self.sine_initial_level_spin.value()
         self.shared_config.sine_max_level_rate = self.sine_max_level_rate_spin.value()
+
+        self.shared_config.data_log_enabled = self.data_log_check.isChecked()
 
         # Emit signal that config was updated
         self.shared_config.config_updated.emit()
