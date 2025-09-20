@@ -8,7 +8,7 @@ This module provides:
 """
 
 import numpy as np
-from scipy.signal import sosfilt, butter, cont2discrete
+from scipy.signal import sosfilt, butter, cont2discrete, lfilter, iirpeak
 import time
 
 
@@ -24,6 +24,19 @@ class ShakerPlantSimulator:
         
         # Create delay buffer
         self.delay_buffer = np.zeros(max(delay_samples, 1))
+
+        # Resonance filters (frequency-dependent gain shaping)
+        self._res_filters = []
+        for freq, Q, gain_mult in self.resonances:
+            if freq <= 0 or freq >= (self.fs / 2.0):
+                continue
+            try:
+                b, a = iirpeak(freq, Q, fs=self.fs)
+                b = b * float(gain_mult)
+                zi = np.zeros(max(len(a), len(b)) - 1, dtype=float)
+                self._res_filters.append({'b': b, 'a': a, 'zi': zi})
+            except Exception:
+                continue
         
         print(f"Simulator: gain={base_gain:.1f} g/V, {len(self.resonances)} resonances, "
               f"noise={noise_level:.3f} g RMS")
@@ -57,14 +70,13 @@ class ShakerPlantSimulator:
         if np.max(np.abs(acceleration)) < 1e-6:
             acceleration = acceleration + np.random.randn(len(acceleration)) * 1e-4
         
-        # Apply simple resonances (frequency-dependent gain without filtering for now)
-        # This avoids filter initialization issues while still providing realistic response
-        for freq, Q, gain_mult in self.resonances:
-            # Add a simple sinusoidal component at the resonance frequency
-            t = np.arange(len(delayed_input)) / self.fs
-            # Make resonance effects more pronounced
-            resonant_component = np.sin(2 * np.pi * freq * t) * delayed_input * (gain_mult - 1.0) * 0.5
-            acceleration += resonant_component * self.base_gain
+        # Apply resonance shaping through biquad peaks
+        if self._res_filters:
+            res_total = np.zeros_like(acceleration)
+            for filt in self._res_filters:
+                y, filt['zi'] = lfilter(filt['b'], filt['a'], delayed_input, zi=filt['zi'])
+                res_total += y
+            acceleration += res_total
         
         # Add measurement noise
         if self.noise_level > 0:
