@@ -26,8 +26,8 @@ TEST_MODE = "random"
 # ============= SYSTEM PARAMETERS =============
 FS = 51200.0                # Sample rate [Hz]
 BUF_SECONDS = 4           # Buffer size for AO/AI streaming
-BLOCK_SECONDS = 0.25         # Processing block duration
-WELCH_NPERSEG = 4096        # Welch segment length (power of 2)
+BLOCK_SECONDS = 1         # Processing block duration
+WELCH_NPERSEG = 8192        # Welch segment length (power of 2)
 
 # ============= TARGET PSD PROFILE =============
 # List of (frequency [Hz], PSD level [g^2/Hz]) pairs

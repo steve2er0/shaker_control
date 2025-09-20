@@ -22,7 +22,7 @@ from scipy.signal import welch
 from PySide6.QtWidgets import (QApplication, QMainWindow, QTabWidget, QVBoxLayout, 
                               QHBoxLayout, QWidget, QFormLayout, QDoubleSpinBox, 
                               QSpinBox, QPushButton, QCheckBox, QLabel, QGroupBox,
-                              QComboBox, QScrollArea)
+                              QComboBox, QScrollArea, QStackedWidget)
 from PySide6.QtCore import QTimer, Signal, QObject, QThread, Qt
 from PySide6.QtGui import QFont
 
@@ -622,21 +622,40 @@ class ControllerTab(QWidget):
         
         # Update metrics plot
         if metrics_data:
+            if len(metrics_data) < 6:
+                return
             self.update_counter += 1
             self.time_data.append(self.update_counter)
-            
-            a_rms, s_avg_meas, s_avg_target, level_fraction, sat_frac, plant_gain = metrics_data
-            
+
+            a_rms, s_avg_meas, s_avg_target, level_fraction, sat_frac, plant_gain = metrics_data[:6]
+            freq_hz = metrics_data[6] if len(metrics_data) >= 7 else None
+            peak_g = metrics_data[7] if len(metrics_data) >= 8 else None
+            target_peak_g = metrics_data[8] if len(metrics_data) >= 9 else None
+
             self.rms_data.append(a_rms)
             self.level_data.append(level_fraction)
             self.sat_data.append(sat_frac * 100)  # Convert to percentage
             self.plant_gain_data.append(plant_gain)
-            
+
             # Update curves
             self.rms_curve.setData(list(self.time_data), list(self.rms_data))
             self.level_curve.setData(list(self.time_data), list(self.level_data))
             self.sat_curve.setData(list(self.time_data), list(self.sat_data))
             self.plant_gain_curve.setData(list(self.time_data), list(self.plant_gain_data))
+
+            if (
+                freq_hz is not None
+                and peak_g is not None
+                and self.shared_config.test_mode == "sine_sweep"
+            ):
+                if target_peak_g is not None:
+                    self.status_label.setText(
+                        f"Status: Running | f={freq_hz:.1f} Hz | gpk={peak_g:.3f} (target {target_peak_g:.3f})"
+                    )
+                else:
+                    self.status_label.setText(
+                        f"Status: Running | f={freq_hz:.1f} Hz | gpk={peak_g:.3f}"
+                    )
         
         # Update equalizer plot
         if eq_data is not None:
@@ -713,8 +732,8 @@ class ControllerTab(QWidget):
 
 
 class RealTimeDataTab(QWidget):
-    """Real-time data tab with time domain and PSD plots"""
-    
+    """Real-time data tab with mode-aware visualization."""
+
     def __init__(self, shared_config):
         super().__init__()
         self.shared_config = shared_config
@@ -723,47 +742,56 @@ class RealTimeDataTab(QWidget):
         self.num_channels = max(1, self.shared_config.num_input_channels)
         self.welch_nperseg = int(getattr(self.shared_config, 'welch_nperseg', config.WELCH_NPERSEG))
         self.psd_update_stride = max(1, int(getattr(self.shared_config, 'realtime_psd_update_stride', 5)))
-        self.init_ui()
-        
-        # Data storage for RMS history
+
+        # Random-vibration data stores
         self.history_length = 300
         self.update_indices = deque(maxlen=self.history_length)
         self.rms_history = [deque(maxlen=self.history_length) for _ in range(self.num_channels)]
         self.update_count = 0
-
-        # PSD data from controller (will be updated via signal)
         self.psd_target = None
-        self.psd_latest = [None] * self.num_channels  # (f, Pxx) per channel
+        self.psd_latest = [None] * self.num_channels
         self._psd_dirty = False
-        
-        # Streaming state
+
+        # Sine-sweep data stores
+        self.sine_freq_history = deque(maxlen=2000)
+        self.sine_peak_history = deque(maxlen=2000)
+        self.sine_target_history = deque(maxlen=2000)
+        self.latest_block = None
+        self.latest_time_axis = None
+
+        self._build_ui()
+        self.shared_config.config_updated.connect(self._handle_config_update)
+
         self.is_streaming = False
-        
-        # Timer for plot updates
         self.update_timer = QTimer()
         self.update_timer.timeout.connect(self.update_streaming_plot)
-        self.update_timer.setInterval(33)  # ~30 fps
-    
-    def init_ui(self):
+        self.update_timer.setInterval(33)
+        self._update_mode_view()
+
+    def _build_ui(self):
         layout = QVBoxLayout()
-        
-        # Display options
-        options_layout = QHBoxLayout()
-        
+
+        self.options_container = QWidget()
+        options_layout = QHBoxLayout(self.options_container)
         self.autoscale_check = QCheckBox("Enable Autoscaling")
         self.autoscale_check.setChecked(True)
-        
         options_layout.addWidget(QLabel("Display Options:"))
         options_layout.addWidget(self.autoscale_check)
         options_layout.addStretch()
-        
-        layout.addLayout(options_layout)
-        
-        # Create plot widget with two plots
-        self.plot_widget = pg.GraphicsLayoutWidget()
-        
-        # RMS history plot
-        self.rms_plot = self.plot_widget.addPlot(title="Channel g-RMS History")
+        layout.addWidget(self.options_container)
+
+        self.stack = QStackedWidget()
+        self.stack_random = self._create_random_view()
+        self.stack_sine = self._create_sine_view()
+        self.stack.addWidget(self.stack_random)
+        self.stack.addWidget(self.stack_sine)
+        layout.addWidget(self.stack)
+
+        self.setLayout(layout)
+
+    def _create_random_view(self) -> QWidget:
+        widget = pg.GraphicsLayoutWidget()
+        self.rms_plot = widget.addPlot(title="Channel g-RMS History")
         self.rms_plot.setLabel('left', 'g-RMS [g]')
         self.rms_plot.setLabel('bottom', 'Update Index')
         self.rms_plot.showGrid(x=True, y=True)
@@ -774,23 +802,18 @@ class RealTimeDataTab(QWidget):
             pen = pg.mkPen(color=color, width=2)
             curve = self.rms_plot.plot(pen=pen, name=label)
             self.rms_curves.append(curve)
-        
-        # Next row - PSD plot
-        self.plot_widget.nextRow()
-        
-        # PSD plot
-        self.psd_plot = self.plot_widget.addPlot(title="Averaged PSD from Controller")
+
+        widget.nextRow()
+        self.psd_plot = widget.addPlot(title="Averaged PSD from Controller")
         self.psd_plot.setLogMode(x=False, y=True)
         self.psd_plot.setLabel('left', 'PSD [g²/Hz]')
         self.psd_plot.setLabel('bottom', 'Frequency [Hz]')
         self.psd_plot.showGrid(x=True, y=True)
-        # Lock PSD x-axis to 20–2000 Hz and prevent x auto-ranging
         vb_psd = self.psd_plot.getViewBox()
         vb_psd.setAutoVisible(x=False, y=True)
         self.psd_plot.enableAutoRange(x=False, y=True)
         self.psd_plot.setLimits(xMin=20.0, xMax=2000.0)
         self.psd_plot.setRange(xRange=(20.0, 2000.0), padding=0)
-        
         self.psd_plot.addLegend()
         self.psd_curves = []
         for idx, label in enumerate(self.channel_labels):
@@ -798,25 +821,64 @@ class RealTimeDataTab(QWidget):
             pen = pg.mkPen(color=color, width=1.8)
             curve = self.psd_plot.plot(pen=pen, name=f"{label} PSD")
             self.psd_curves.append(curve)
-        target_pen = pg.mkPen(color='r', style=Qt.DashLine, width=2)
-        self.psd_target_curve = self.psd_plot.plot(pen=target_pen, name='Target PSD')
-        
-        layout.addWidget(self.plot_widget)
-        self.setLayout(layout)
-    
+        self.psd_target_curve = self.psd_plot.plot(pen=pg.mkPen('r', style=Qt.DashLine, width=2), name='Target PSD')
+        return widget
+
+    def _create_sine_view(self) -> QWidget:
+        widget = pg.GraphicsLayoutWidget()
+        self.freq_plot = widget.addPlot(title="Control Accel g-peak vs Frequency")
+        self.freq_plot.setLabel('bottom', 'Frequency [Hz]')
+        self.freq_plot.setLabel('left', 'g-peak [g]')
+        self.freq_plot.setLogMode(x=False, y=False)
+        self.freq_plot.showGrid(x=True, y=True)
+        self.freq_scatter = pg.ScatterPlotItem(size=7, brush=pg.mkBrush(50, 200, 255, 180))
+        self.freq_plot.addItem(self.freq_scatter)
+        self.freq_plot.setRange(xRange=(self.shared_config.sine_start_hz, self.shared_config.sine_end_hz))
+        self.freq_plot.setLimits(xMin=self.shared_config.sine_start_hz * 0.5,
+                                 xMax=self.shared_config.sine_end_hz * 2.0)
+        self.freq_target_curve = self.freq_plot.plot(pen=pg.mkPen('r', style=Qt.DashLine, width=2))
+
+        widget.nextRow()
+        self.time_plot = widget.addPlot(title="Control Acceleration (latest block)")
+        self.time_plot.setLabel('bottom', 'Time [s]')
+        self.time_plot.setLabel('left', 'Accel [g]')
+        self.time_plot.showGrid(x=True, y=True)
+        self.time_curve = self.time_plot.plot(pen=pg.mkPen('y', width=1.5))
+        return widget
+
+    def _is_sine_mode(self) -> bool:
+        return getattr(self.shared_config, 'test_mode', '') == "sine_sweep"
+
+    def _update_mode_view(self) -> None:
+        if self._is_sine_mode():
+            self.stack.setCurrentWidget(self.stack_sine)
+            self.options_container.hide()
+        else:
+            self.stack.setCurrentWidget(self.stack_random)
+            self.options_container.show()
+
+    def _handle_config_update(self):
+        self._update_mode_view()
+
     def start_streaming(self):
         """Start real-time data streaming"""
         self.is_streaming = True
-        self.update_indices.clear()
-        for history in self.rms_history:
-            history.clear()
-        self.update_count = 0
-        self.psd_latest = [None] * self.num_channels
-        self._psd_dirty = False
+        self._update_mode_view()
+        if not self._is_sine_mode():
+            self.update_indices.clear()
+            for history in self.rms_history:
+                history.clear()
+            self.update_count = 0
+            self.psd_latest = [None] * self.num_channels
+            self._psd_dirty = False
+            self.psd_target = None
+        else:
+            self.sine_freq_history.clear()
+            self.sine_peak_history.clear()
+            self.sine_target_history.clear()
+            self.latest_block = None
+            self.latest_time_axis = None
 
-        # Clear PSD data
-        self.psd_target = None
-        
         # Start update timer (must be called from main thread)
         if not self.update_timer.isActive():
             self.update_timer.start()
@@ -844,33 +906,58 @@ class RealTimeDataTab(QWidget):
         if n_samples == 0:
             return
 
-        # Update RMS history for each channel
-        rms_values = np.sqrt(np.mean(block ** 2, axis=1))
-        self.update_count += 1
-        self.update_indices.append(self.update_count)
-        for ch_idx, value in enumerate(rms_values):
-            self.rms_history[ch_idx].append(float(value))
+        if self._is_sine_mode():
+            control_block = block[0]
+            self.latest_block = control_block.astype(float, copy=True)
+            self.latest_time_axis = np.arange(n_samples, dtype=float) / self.fs
+        else:
+            rms_values = np.sqrt(np.mean(block ** 2, axis=1))
+            self.update_count += 1
+            self.update_indices.append(self.update_count)
+            for ch_idx, value in enumerate(rms_values):
+                self.rms_history[ch_idx].append(float(value))
 
-        compute_psd = (self.update_count == 1) or (self.update_count % self.psd_update_stride == 0)
-        if compute_psd:
-            for ch_idx in range(1, self.num_channels):
-                try:
-                    f_vals, Pxx = welch(block[ch_idx], fs=self.fs, nperseg=self.welch_nperseg)
-                    self.psd_latest[ch_idx] = (f_vals, Pxx)
-                    self._psd_dirty = True
-                except Exception:
-                    continue
+            compute_psd = (self.update_count == 1) or (self.update_count % self.psd_update_stride == 0)
+            if compute_psd:
+                for ch_idx in range(1, self.num_channels):
+                    try:
+                        f_vals, Pxx = welch(block[ch_idx], fs=self.fs, nperseg=self.welch_nperseg)
+                        self.psd_latest[ch_idx] = (f_vals, Pxx)
+                        self._psd_dirty = True
+                    except Exception:
+                        continue
 
     def update_streaming_plot(self):
         """Update the streaming plot display"""
-        if not self.is_streaming or not self.update_indices:
+        if not self.is_streaming:
             return
-        
+
+        if self._is_sine_mode():
+            if self.sine_freq_history:
+                self.freq_scatter.setData(list(self.sine_freq_history), list(self.sine_peak_history))
+                if self.sine_target_history:
+                    self.freq_target_curve.setData(
+                        list(self.sine_freq_history), list(self.sine_target_history)
+                    )
+                else:
+                    self.freq_target_curve.clear()
+            else:
+                self.freq_scatter.setData([], [])
+                self.freq_target_curve.clear()
+
+            if self.latest_block is not None and self.latest_time_axis is not None:
+                self.time_curve.setData(self.latest_time_axis, self.latest_block)
+            else:
+                self.time_curve.clear()
+            return
+
+        if not self.update_indices:
+            return
+
         x_vals = list(self.update_indices)
         for curve, channel_history in zip(self.rms_curves, self.rms_history):
             curve.setData(x_vals, list(channel_history))
 
-        # Update PSD plot with latest channel PSD estimates when data changed
         if self._psd_dirty and any(entry is not None for entry in self.psd_latest):
             try:
                 for ch_idx, curve in enumerate(self.psd_curves):
@@ -909,15 +996,13 @@ class RealTimeDataTab(QWidget):
                     else:
                         self.psd_target_curve.clear()
 
-                # Re-enforce fixed x-range after updates
                 self.psd_plot.setRange(xRange=(20.0, 2000.0), padding=0)
-                
+
             except Exception:
-                pass  # Skip PSD update if calculation fails
+                pass
             finally:
                 self._psd_dirty = False
 
-        # Autoscaling for RMS history
         if self.autoscale_check.isChecked():
             populated = [np.asarray(history, dtype=float) for history in self.rms_history if history]
             if populated:
@@ -931,6 +1016,8 @@ class RealTimeDataTab(QWidget):
     
     def update_psd_data(self, psd_data):
         """Update PSD data from controller"""
+        if self._is_sine_mode():
+            return
         if len(psd_data) == 4:  # New format with averaged PSD
             f, psd_measured, psd_target, psd_averaged = psd_data
             self.psd_latest[0] = (f, psd_averaged)
@@ -940,6 +1027,13 @@ class RealTimeDataTab(QWidget):
             self.psd_latest[0] = (f, psd_measured)
             self.psd_target = (f, psd_target)
         self._psd_dirty = True
+
+    def update_sine_metrics(self, freq_hz: float, peak_g: float, target_peak_g: float):
+        if not self._is_sine_mode() or not self.is_streaming:
+            return
+        self.sine_freq_history.append(float(freq_hz))
+        self.sine_peak_history.append(float(peak_g))
+        self.sine_target_history.append(float(target_peak_g))
 
 
 class ControllerWorker(QObject):
@@ -1473,8 +1567,19 @@ class ControllerWorker(QObject):
 
                 target_rms_block = target_vpk / np.sqrt(2.0)
                 self.psd_data_ready.emit((f, Pxx, None, self.psd_averaged))
+                target_peak_g = target_vpk * plant_gain
                 self.metrics_data_ready.emit(
-                    (a_rms_meas, a_rms_meas, target_rms_block, level_fraction, sat_frac, plant_gain)
+                    (
+                        a_rms_meas,
+                        a_rms_meas,
+                        target_rms_block,
+                        level_fraction,
+                        sat_frac,
+                        plant_gain,
+                        freq,
+                        meas_peak,
+                        target_peak_g,
+                    )
                 )
                 self.realtime_data_ready.emit(np.array(data, copy=True))
 
@@ -1551,6 +1656,18 @@ class MainWindow(QMainWindow):
     def handle_metrics_data(self, data):
         """Handle metrics data from controller worker"""
         self.controller_tab.update_plots(metrics_data=data)
+        if (
+            self.shared_config.test_mode == "sine_sweep"
+            and isinstance(data, (list, tuple))
+            and len(data) >= 9
+        ):
+            try:
+                freq_hz = float(data[6])
+                peak_g = float(data[7])
+                target_peak_g = float(data[8])
+            except (TypeError, ValueError):
+                return
+            self.realtime_tab.update_sine_metrics(freq_hz, peak_g, target_peak_g)
     
     def handle_eq_data(self, data):
         """Handle equalizer data from controller worker"""
