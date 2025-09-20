@@ -26,8 +26,8 @@ TEST_MODE = "random"
 # ============= SYSTEM PARAMETERS =============
 FS = 51200.0                # Sample rate [Hz]
 BUF_SECONDS = 4           # Buffer size for AO/AI streaming
-BLOCK_SECONDS = 0.5         # Processing block duration
-WELCH_NPERSEG = 8192        # Welch segment length (power of 2)
+BLOCK_SECONDS = 0.25         # Processing block duration
+WELCH_NPERSEG = 4096        # Welch segment length (power of 2)
 
 # ============= TARGET PSD PROFILE =============
 # List of (frequency [Hz], PSD level [g^2/Hz]) pairs
@@ -70,6 +70,15 @@ SINE_SWEEP_OCTAVES_PER_MIN = 1.0
 SINE_SWEEP_REPEAT = True        # Restart sweep automatically when end reached
 SINE_SWEEP_INITIAL_LEVEL = 0.2  # Fraction of target level to start from
 SINE_SWEEP_MAX_LEVEL_RATE = 0.5 # Max change in level fraction per second
+SINE_SWEEP_POINTS_PER_OCTAVE = 12
+SINE_SWEEP_STEP_DWELL = 0.5    # Dwell time per frequency step [s]
+SINE_SWEEP_DEFAULT_VPK = 0.4   # Default drive amplitude (peak volts) when no table provided
+SINE_SWEEP_DRIVE_SCALE = 1.0   # Global scale factor applied to the drive table/default
+SINE_SWEEP_DRIVE_TABLE = [     # Optional list of (frequency [Hz], peak volts)
+    (20.0, 0.35),
+    (200.0, 0.35),
+    (2000.0, 0.35),
+]
 
 # ============= SIMULATION MODE =============
 SIMULATION_MODE = False          # Set to False for real hardware

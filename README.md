@@ -49,6 +49,20 @@ python3 app.py
 3. Optional: adjust ramp with `SINE_SWEEP_INITIAL_LEVEL` and `SINE_SWEEP_MAX_LEVEL_RATE`
 4. Run `python3 app.py` (simulation or hardware as above)
 
+Sine sweeps now run as stepped, open-loop excitations. Configure the per-step dwell and voltage profile via:
+
+```python
+SINE_SWEEP_POINTS_PER_OCTAVE = 12
+SINE_SWEEP_STEP_DWELL = 0.5    # seconds per frequency
+SINE_SWEEP_DEFAULT_VPK = 0.4   # fallback command amplitude (peak volts)
+SINE_SWEEP_DRIVE_SCALE = 1.0   # global multiplier
+SINE_SWEEP_DRIVE_TABLE = [     # optional frequency→voltage pairs
+    (20.0, 0.35),
+    (200.0, 0.35),
+    (2000.0, 0.35),
+]
+```
+
 ## ⚙️ **Configuration**
 
 All parameters are centralized in `config.py`:
@@ -74,6 +88,15 @@ SINE_SWEEP_OCTAVES_PER_MIN = 1.0
 SINE_SWEEP_REPEAT = True             # Automatically restart when the sweep finishes
 SINE_SWEEP_INITIAL_LEVEL = 0.2       # Fraction of target to start from (smooth ramp)
 SINE_SWEEP_MAX_LEVEL_RATE = 0.5      # Fraction per second ramp rate
+SINE_SWEEP_POINTS_PER_OCTAVE = 12    # Log spacing density
+SINE_SWEEP_STEP_DWELL = 0.5          # Seconds to dwell at each frequency
+SINE_SWEEP_DEFAULT_VPK = 0.4         # Default peak command when no table entry exists
+SINE_SWEEP_DRIVE_SCALE = 1.0         # Global amplitude multiplier
+SINE_SWEEP_DRIVE_TABLE = [           # Optional drive table for repeatable excitation
+    (20.0, 0.35),
+    (200.0, 0.35),
+    (2000.0, 0.35),
+]
 ```
 
 ### **Control Tuning**
@@ -97,6 +120,7 @@ AO_VOLT_LIMIT = 2.0             # Absolute peak limit
 - ✅ **PI control** with anti-windup
 - ✅ **Plant gain estimation** (adaptive)
 - ✅ **Target PSD shaping** (custom profiles)
+- ✅ **Repeatable sine sweep excitation** using stepwise drive tables
 
 ### **Safety Systems**
 - ✅ **Crest factor limiting** (soft compression)

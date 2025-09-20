@@ -13,6 +13,7 @@ Built with PySide6 and PyQtGraph for high-performance plotting.
 import sys
 import numpy as np
 import time
+import math
 from collections import deque
 from threading import Thread, Event
 from scipy.signal import welch
@@ -48,7 +49,11 @@ except ImportError:
 import config
 from rv_controller import MultiBandEqualizer, RandomVibrationController, create_bandpass_filter, make_bandlimited_noise, apply_safety_limiters
 from simulation import create_simulation_system
-from sine_sweep import LogSweepGenerator, target_g_rms
+from sine_sweep import (
+    LogSweepStepper,
+    SineOscillator,
+    build_drive_lookup,
+)
 
 
 class SharedConfig(QObject):
@@ -84,6 +89,15 @@ class SharedConfig(QObject):
         # Use random vibration defaults if sine sweep overrides are not defined
         sine_initial_default = getattr(config, 'SINE_SWEEP_INITIAL_LEVEL', config.INITIAL_LEVEL_FRACTION)
         sine_rate_default = getattr(config, 'SINE_SWEEP_MAX_LEVEL_RATE', config.MAX_LEVEL_FRACTION_RATE)
+        self.sine_points_per_octave = float(getattr(config, 'SINE_SWEEP_POINTS_PER_OCTAVE', 12.0))
+        self.sine_step_dwell = float(max(0.05, getattr(config, 'SINE_SWEEP_STEP_DWELL', 0.5)))
+        self.sine_default_vpk = float(max(0.0, getattr(config, 'SINE_SWEEP_DEFAULT_VPK', 0.4)))
+        self.sine_drive_scale = float(getattr(config, 'SINE_SWEEP_DRIVE_SCALE', 1.0))
+        table_raw = getattr(config, 'SINE_SWEEP_DRIVE_TABLE', [])
+        try:
+            self.sine_drive_table = [(float(f), float(v)) for f, v in table_raw]
+        except Exception:
+            self.sine_drive_table = []
 
         # Control parameters
         self.initial_level_fraction = config.INITIAL_LEVEL_FRACTION
@@ -1335,24 +1349,7 @@ class ControllerWorker(QObject):
         level_fraction = float(np.clip(self.shared_config.sine_initial_level, 0.0, 1.0))
         start_hz = max(0.01, float(self.shared_config.sine_start_hz))
         end_hz = max(0.01, float(self.shared_config.sine_end_hz))
-        try:
-            target_rms = float(
-                target_g_rms(
-                    self.shared_config.sine_g_level,
-                    self.shared_config.sine_g_level_is_rms,
-                )
-            )
-        except ValueError:
-            target_rms = max(abs(float(self.shared_config.sine_g_level)), 1e-3)
         max_level_rate = max(0.0, float(self.shared_config.sine_max_level_rate))
-
-        generator = LogSweepGenerator(
-            fs=fs,
-            start_freq=start_hz,
-            end_freq=end_hz,
-            octaves_per_minute=float(self.shared_config.sine_octaves_per_min),
-            repeat=bool(self.shared_config.sine_repeat),
-        )
 
         block_duration = block_samples / max(fs, 1e-9)
         if not simulation_mode and WAIT_INFINITELY is not None:
@@ -1364,127 +1361,140 @@ class ControllerWorker(QObject):
         last_level_update = time.time()
         t_last_print = time.time()
 
-        # Clear EQ display since it is not used in sine sweep mode
+        points_per_octave = max(1.0, float(self.shared_config.sine_points_per_octave))
+        stepper = LogSweepStepper(
+            start_freq=start_hz,
+            end_freq=end_hz,
+            points_per_octave=points_per_octave,
+            repeat=bool(self.shared_config.sine_repeat),
+        )
+        oscillator = SineOscillator(fs, stepper.current_frequency())
+        dwell_seconds = max(self.shared_config.sine_step_dwell, block_duration)
+        lookup_drive = build_drive_lookup(
+            self.shared_config.sine_drive_table,
+            self.shared_config.sine_default_vpk,
+        )
+
         self.eq_data_ready.emit(None)
         self.psd_averaged = None
 
         while not self.should_stop.is_set():
-            loop_start = time.perf_counter()
-            unit_drive, sweep_status = generator.generate_block(block_samples)
+            freq = stepper.current_frequency()
+            oscillator.set_frequency(freq)
+            dwell_remaining = dwell_seconds
 
-            target_rms_block = target_rms * max(level_fraction, 0.0)
-            if target_rms_block <= 0:
-                target_rms_block = max(target_rms * max(level_fraction, 0.01), 1e-6)
+            drive_vpk = lookup_drive(freq) * self.shared_config.sine_drive_scale
+            drive_vpk = max(0.0, drive_vpk)
 
-            volts_block = (target_rms_block / max(plant_gain, 1e-6)) * unit_drive
-            if np.std(volts_block) < 1e-7:
-                volts_block = volts_block + 1e-7 * np.random.randn(block_samples)
+            print(f"Sine sweep step: {freq:.1f} Hz, command ≈ {drive_vpk:.3f} Vpk")
 
-            volts_block, limiter_stats = apply_safety_limiters(
-                volts_block,
-                self.shared_config.max_crest_factor,
-                self.shared_config.max_rms_volts,
-                0.8,
-                0.9,
-            )
-            volts_block = np.clip(
-                volts_block,
-                -self.shared_config.ao_volt_limit,
-                self.shared_config.ao_volt_limit,
-            )
+            while dwell_remaining > 1e-9 and not self.should_stop.is_set():
+                loop_start = time.perf_counter()
+                sin_block, cos_block = oscillator.generate(block_samples)
 
-            if simulation_mode:
-                ao_writer.write_many_sample(volts_block)
-            else:
-                ao_writer.write_many_sample(volts_block, timeout=io_timeout)
+                target_vpk = drive_vpk * max(level_fraction, 0.0)
+                command_block = target_vpk * sin_block
 
-            if self.shared_config.num_input_channels > 1:
-                data = np.empty((self.shared_config.num_input_channels, block_samples), dtype=np.float64)
-            else:
-                data = np.empty(block_samples, dtype=np.float64)
-
-            if simulation_mode:
-                ai_reader.read_many_sample(data, number_of_samples_per_channel=block_samples)
-            else:
-                ai_reader.read_many_sample(
-                    data,
-                    number_of_samples_per_channel=block_samples,
-                    timeout=io_timeout,
+                command_block, limiter_stats = apply_safety_limiters(
+                    command_block,
+                    self.shared_config.max_crest_factor,
+                    self.shared_config.max_rms_volts,
+                    0.8,
+                    0.9,
+                )
+                command_block = np.clip(
+                    command_block,
+                    -self.shared_config.ao_volt_limit,
+                    self.shared_config.ao_volt_limit,
                 )
 
-            if volts_to_g_scale is not None:
-                if data.ndim == 2:
-                    data[0, :] *= volts_to_g_scale
-                    accel_data = data[0]
+                if simulation_mode:
+                    ao_writer.write_many_sample(command_block)
                 else:
-                    data *= volts_to_g_scale
-                    accel_data = data
-            else:
-                accel_data = data[0] if data.ndim == 2 else data
+                    ao_writer.write_many_sample(command_block, timeout=io_timeout)
 
-            a_rms_meas = float(np.sqrt(np.mean(np.square(accel_data))))
-            v_rms_cmd = float(np.sqrt(np.mean(np.square(volts_block))))
-            if v_rms_cmd > 1e-9:
-                new_gain = a_rms_meas / max(v_rms_cmd, 1e-9)
-                plant_gain = 0.8 * plant_gain + 0.2 * new_gain
+                if self.shared_config.num_input_channels > 1:
+                    data = np.empty((self.shared_config.num_input_channels, block_samples), dtype=np.float64)
+                else:
+                    data = np.empty(block_samples, dtype=np.float64)
 
-            now = time.time()
-            dt = max(now - last_level_update, 1e-3)
-            last_level_update = now
-            if level_fraction < 1.0 and max_level_rate > 0.0:
-                level_fraction = min(1.0, level_fraction + max_level_rate * dt)
+                if simulation_mode:
+                    ai_reader.read_many_sample(data, number_of_samples_per_channel=block_samples)
+                else:
+                    ai_reader.read_many_sample(
+                        data,
+                        number_of_samples_per_channel=block_samples,
+                        timeout=io_timeout,
+                    )
 
-            sat_frac = float(np.mean(np.abs(volts_block) >= (0.98 * self.shared_config.ao_volt_limit)))
-            if sat_frac > 0.2:
-                level_fraction = max(0.0, level_fraction * 0.9)
-                self.status_message.emit("AO near saturation; backing off level.")
+                if volts_to_g_scale is not None:
+                    if data.ndim == 2:
+                        data[0, :] *= volts_to_g_scale
+                        accel_data = data[0]
+                    else:
+                        data *= volts_to_g_scale
+                        accel_data = data
+                else:
+                    accel_data = data[0] if data.ndim == 2 else data
 
-            if target_rms > 0 and a_rms_meas > target_rms * 1.3:
-                level_fraction = max(0.0, level_fraction * 0.9)
-                self.status_message.emit("Measured level above target; reducing drive.")
+                scale = 2.0 / float(len(command_block))
+                cmd_peak = scale * float(np.hypot(np.dot(command_block, sin_block), np.dot(command_block, cos_block)))
+                meas_peak = scale * float(np.hypot(np.dot(accel_data, sin_block), np.dot(accel_data, cos_block)))
+                a_rms_meas = meas_peak / np.sqrt(2.0)
 
-            nperseg = min(len(accel_data), max(256, int(self.shared_config.welch_nperseg)))
-            if nperseg > len(accel_data):
-                nperseg = len(accel_data)
-            f, Pxx = welch(accel_data, fs=fs, nperseg=nperseg)
+                if cmd_peak > 1e-9:
+                    new_gain = meas_peak / cmd_peak
+                    plant_gain = 0.8 * plant_gain + 0.2 * new_gain
 
-            if self.psd_averaged is None or len(self.psd_averaged) != len(Pxx):
-                self.psd_averaged = Pxx.copy()
-            else:
-                self.psd_averaged = (
-                    self.psd_alpha * Pxx + (1 - self.psd_alpha) * self.psd_averaged
+                now = time.time()
+                dt = max(now - last_level_update, 1e-3)
+                last_level_update = now
+                if level_fraction < 1.0 and max_level_rate > 0.0:
+                    level_fraction = min(1.0, level_fraction + max_level_rate * dt)
+
+                sat_frac = float(
+                    np.mean(np.abs(command_block) >= (0.98 * self.shared_config.ao_volt_limit))
                 )
+                if sat_frac > 0.2:
+                    level_fraction = max(0.0, level_fraction * 0.9)
+                    self.status_message.emit("AO near saturation; backing off level.")
 
-            self.psd_data_ready.emit((f, Pxx, None, self.psd_averaged))
-            self.metrics_data_ready.emit(
-                (a_rms_meas, a_rms_meas, target_rms, level_fraction, sat_frac, plant_gain)
-            )
-            self.realtime_data_ready.emit(np.array(data, copy=True))
+                nperseg = min(len(accel_data), max(256, int(self.shared_config.welch_nperseg)))
+                if nperseg > len(accel_data):
+                    nperseg = len(accel_data)
+                f, Pxx = welch(accel_data, fs=fs, nperseg=nperseg)
 
-            if (now - t_last_print) >= getattr(config, 'CONSOLE_UPDATE_INTERVAL', 5.0):
-                t_last_print = now
-                freq_center = np.sqrt(
-                    max(sweep_status.freq_start, 1e-6) * max(sweep_status.freq_end, 1e-6)
+                if self.psd_averaged is None or len(self.psd_averaged) != len(Pxx):
+                    self.psd_averaged = Pxx.copy()
+                else:
+                    self.psd_averaged = (
+                        self.psd_alpha * Pxx + (1 - self.psd_alpha) * self.psd_averaged
+                    )
+
+                target_rms_block = target_vpk / np.sqrt(2.0)
+                self.psd_data_ready.emit((f, Pxx, None, self.psd_averaged))
+                self.metrics_data_ready.emit(
+                    (a_rms_meas, a_rms_meas, target_rms_block, level_fraction, sat_frac, plant_gain)
                 )
-                limiter_flag = " LIMIT" if limiter_stats.get('any_limiting') else ""
-                print(
-                    f"f≈{freq_center:.1f} Hz | target={target_rms_block*np.sqrt(2):.3g} gpk "
-                    f"({target_rms_block:.3g} g RMS) | meas={a_rms_meas*np.sqrt(2):.3g} gpk "
-                    f"({a_rms_meas:.3g} g RMS) | level={level_fraction:.3f} | "
-                    f"gain={plant_gain:.3g} g/V | sat={sat_frac:.1%}{limiter_flag}"
-                )
+                self.realtime_data_ready.emit(np.array(data, copy=True))
 
-            if sweep_status.cycle_completed and not self.shared_config.sine_repeat:
-                self.status_message.emit("Sine sweep complete")
-                break
+                dwell_remaining -= block_duration
 
-            if simulation_mode:
-                if loop_sleep > 0:
-                    time.sleep(loop_sleep)
-            else:
-                remaining = block_duration - (time.perf_counter() - loop_start)
-                if remaining > 0:
-                    time.sleep(remaining)
+                if getattr(config, 'CONSOLE_UPDATE_INTERVAL', 5.0) > 0:
+                    pass  # optional additional logging removed for simplicity
+
+                if simulation_mode:
+                    if loop_sleep > 0:
+                        time.sleep(loop_sleep)
+                else:
+                    remaining = block_duration - (time.perf_counter() - loop_start)
+                    if remaining > 0:
+                        time.sleep(remaining)
+
+            if not stepper.advance():
+                if not self.shared_config.sine_repeat:
+                    self.status_message.emit("Sine sweep complete")
+                    break
 
     def stop(self):
         """Stop the controller loop"""
