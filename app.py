@@ -11,12 +11,19 @@ Built with PySide6 and PyQtGraph for high-performance plotting.
 """
 
 import sys
+import csv
 import numpy as np
 import time
 import math
 from collections import deque
 from threading import Thread, Event
+from pathlib import Path
+from datetime import datetime
 from scipy.signal import welch
+try:
+    import h5py
+except ImportError:  # pragma: no cover
+    h5py = None
 
 # GUI imports
 from PySide6.QtWidgets import (QApplication, QMainWindow, QTabWidget, QVBoxLayout, 
@@ -54,6 +61,182 @@ from sine_sweep import (
     SineOscillator,
     build_drive_lookup,
 )
+
+
+class DataLogger:
+    """Handle raw block logging and summary exports."""
+
+    def __init__(self, shared_config, mode, fs, block_samples, num_channels):
+        self.enabled = bool(getattr(shared_config, 'data_log_enabled', False))
+        self.mode = mode
+        self.fs = float(fs)
+        self.block_samples = int(block_samples)
+        self.config_channels = max(1, int(num_channels))
+        self.welch_nperseg = int(getattr(shared_config, 'welch_nperseg', 2048))
+
+        if not self.enabled:
+            self.h5 = None
+            return
+        if h5py is None:
+            print("Warning: h5py not available; data logging disabled.")
+            self.enabled = False
+            self.h5 = None
+            return
+
+        base_dir = Path(getattr(shared_config, 'data_log_dir', 'data_logs')).expanduser()
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        self.run_dir = base_dir / f"{timestamp}_{mode}"
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+
+        self.h5 = h5py.File(self.run_dir / 'data.h5', 'w')
+        self.h5.attrs['mode'] = mode
+        self.h5.attrs['fs'] = self.fs
+        self.h5.attrs['block_samples'] = self.block_samples
+        self.h5.attrs['configured_channels'] = self.config_channels
+
+        self.ao_ds = self.h5.create_dataset(
+            'ao',
+            shape=(0, self.block_samples),
+            maxshape=(None, self.block_samples),
+            dtype='f4',
+            chunks=(1, self.block_samples),
+        )
+        self.ai_ds = self.h5.create_dataset(
+            'ai',
+            shape=(0, self.config_channels, self.block_samples),
+            maxshape=(None, self.config_channels, self.block_samples),
+            dtype='f4',
+            chunks=(1, self.config_channels, self.block_samples),
+        )
+
+        self.block_index = 0
+        self.timestamps = []
+        self.level_fraction = []
+        self.sat_fraction = []
+
+        self.last_ai_block = None
+
+        if mode == 'sine_sweep':
+            self.sine_freqs = []
+            self.sine_peak_meas = []
+            self.sine_peak_target = []
+
+    def _prepare_ai_block(self, ai_block):
+        ai = np.asarray(ai_block, dtype=np.float32)
+        if ai.ndim == 1:
+            ai = ai[np.newaxis, :]
+        block_len = ai.shape[1]
+        if block_len != self.block_samples:
+            if block_len > self.block_samples:
+                ai = ai[:, : self.block_samples]
+            else:
+                padded = np.zeros((ai.shape[0], self.block_samples), dtype=np.float32)
+                padded[:, :block_len] = ai
+                ai = padded
+        if ai.shape[0] < self.config_channels:
+            padded = np.zeros((self.config_channels, self.block_samples), dtype=np.float32)
+            padded[: ai.shape[0], :] = ai
+            ai = padded
+        elif ai.shape[0] > self.config_channels:
+            ai = ai[: self.config_channels, :]
+        return ai
+
+    def _append_block(self, ao_block, ai_block):
+        if not self.enabled:
+            return
+        ao = np.asarray(ao_block, dtype=np.float32)
+        if ao.ndim > 1:
+            ao = ao.ravel()
+        if ao.size != self.block_samples:
+            if ao.size > self.block_samples:
+                ao = ao[: self.block_samples]
+            else:
+                padded = np.zeros(self.block_samples, dtype=np.float32)
+                padded[: ao.size] = ao
+                ao = padded
+        ai = self._prepare_ai_block(ai_block)
+
+        self.ao_ds.resize(self.block_index + 1, axis=0)
+        self.ao_ds[self.block_index, :] = ao
+        self.ai_ds.resize(self.block_index + 1, axis=0)
+        self.ai_ds[self.block_index, :, :] = ai
+        self.last_ai_block = ai.copy()
+        self.block_index += 1
+
+    def log_random_block(self, ao_block, ai_block, level_fraction, sat_frac):
+        if not self.enabled:
+            return
+        self._append_block(ao_block, ai_block)
+        self.timestamps.append(time.time())
+        self.level_fraction.append(float(level_fraction))
+        self.sat_fraction.append(float(sat_frac))
+
+    def log_sine_block(self, ao_block, ai_block, level_fraction, sat_frac, freq_hz, peak_meas, peak_target):
+        if not self.enabled:
+            return
+        self._append_block(ao_block, ai_block)
+        self.timestamps.append(time.time())
+        self.level_fraction.append(float(level_fraction))
+        self.sat_fraction.append(float(sat_frac))
+        self.sine_freqs.append(float(freq_hz))
+        self.sine_peak_meas.append(float(peak_meas))
+        self.sine_peak_target.append(float(peak_target))
+
+    def _write_random_preview(self):
+        if self.last_ai_block is None:
+            return
+        freq, _ = welch(
+            self.last_ai_block[0], fs=self.fs, nperseg=min(self.welch_nperseg, self.block_samples)
+        )
+        psd_channels = []
+        for ch_idx in range(self.last_ai_block.shape[0]):
+            _, psd = welch(
+                self.last_ai_block[ch_idx],
+                fs=self.fs,
+                nperseg=min(self.welch_nperseg, self.block_samples),
+            )
+            psd_channels.append(psd)
+
+        preview_path = self.run_dir / 'preview_psd.csv'
+        with preview_path.open('w', newline='') as csv_file:
+            writer = csv.writer(csv_file)
+            header = ['frequency_hz'] + [f'ch{idx}_psd' for idx in range(self.last_ai_block.shape[0])]
+            writer.writerow(header)
+            for i in range(len(freq)):
+                row = [freq[i]] + [psd_channels[ch][i] for ch in range(len(psd_channels))]
+                writer.writerow(row)
+
+    def _write_sine_preview(self):
+        if not self.sine_freqs:
+            return
+        summary_path = self.run_dir / 'sine_summary.csv'
+        with summary_path.open('w', newline='') as csv_file:
+            writer = csv.writer(csv_file)
+            writer.writerow(['frequency_hz', 'g_peak_measured', 'g_peak_target'])
+            for freq, meas, target in zip(self.sine_freqs, self.sine_peak_meas, self.sine_peak_target):
+                writer.writerow([freq, meas, target])
+
+    def close(self):
+        if not self.enabled or self.h5 is None:
+            return
+
+        meta_grp = self.h5.create_group('metadata')
+        meta_grp.create_dataset('timestamp', data=np.array(self.timestamps, dtype=float))
+        meta_grp.create_dataset('level_fraction', data=np.array(self.level_fraction, dtype=float))
+        meta_grp.create_dataset('sat_fraction', data=np.array(self.sat_fraction, dtype=float))
+
+        if self.mode == 'sine_sweep':
+            meta_grp.create_dataset('frequency_hz', data=np.array(self.sine_freqs, dtype=float))
+            meta_grp.create_dataset('g_peak_measured', data=np.array(self.sine_peak_meas, dtype=float))
+            meta_grp.create_dataset('g_peak_target', data=np.array(self.sine_peak_target, dtype=float))
+
+        self.h5.flush()
+        self.h5.close()
+
+        if self.mode.startswith('random'):
+            self._write_random_preview()
+        elif self.mode == 'sine_sweep':
+            self._write_sine_preview()
 
 
 class SharedConfig(QObject):
@@ -98,6 +281,10 @@ class SharedConfig(QObject):
             self.sine_drive_table = [(float(f), float(v)) for f, v in table_raw]
         except Exception:
             self.sine_drive_table = []
+
+        # Data logging
+        self.data_log_enabled = bool(getattr(config, 'DATA_LOG_ENABLED', False))
+        self.data_log_dir = getattr(config, 'DATA_LOG_DIR', 'data_logs')
 
         # Control parameters
         self.initial_level_fraction = config.INITIAL_LEVEL_FRACTION
@@ -1063,6 +1250,7 @@ class ControllerWorker(QObject):
         ai_reader = None
         ao_writer = None
         volts_to_g_scale = None
+        data_logger = None
         try:
             self.is_running = True
             self.start_time = time.time()
@@ -1270,6 +1458,21 @@ class ControllerWorker(QObject):
             print(f"Controller worker running in {mode_label.lower()} mode.")
 
             test_mode = getattr(self.shared_config, 'test_mode', 'random') or 'random'
+
+            if getattr(self.shared_config, 'data_log_enabled', False):
+                mode_tag = 'sine_sweep' if test_mode.lower() == 'sine_sweep' else 'random_vibration'
+                try:
+                    data_logger = DataLogger(
+                        self.shared_config,
+                        mode_tag,
+                        fs,
+                        block_samples,
+                        self.shared_config.num_input_channels,
+                    )
+                except Exception as log_err:
+                    print(f"Data logger init failed: {log_err}")
+                    data_logger = None
+
             if test_mode.lower() == 'sine_sweep':
                 self._run_sine_sweep_loop(
                     ao_writer=ao_writer,
@@ -1279,6 +1482,7 @@ class ControllerWorker(QObject):
                     plant_gain_initial=plant_gain_g_per_V,
                     fs=fs,
                     block_samples=block_samples,
+                    data_logger=data_logger,
                 )
                 return
 
@@ -1404,6 +1608,14 @@ class ControllerWorker(QObject):
                 # Emit current block for real-time visualization
                 self.realtime_data_ready.emit(np.array(data, copy=True))
 
+                if data_logger:
+                    data_logger.log_random_block(
+                        volts_block,
+                        np.array(data, copy=True),
+                        level_fraction,
+                        sat_frac,
+                    )
+
                 # Debug logging for data emission
                 if loop_count % 50 == 0:  # Every ~5 seconds
                     print(f"Debug: Emitting data at {current_time:.1f}s, RMS={np.std(accel_data):.4f}")
@@ -1423,6 +1635,11 @@ class ControllerWorker(QObject):
             traceback.print_exc()
             self.status_message.emit(f"Error: {e}")
         finally:
+            if data_logger:
+                try:
+                    data_logger.close()
+                except Exception:
+                    pass
             for task in (ao_task, ai_task):
                 if task is None:
                     continue
@@ -1438,7 +1655,7 @@ class ControllerWorker(QObject):
             self.status_message.emit("Controller stopped")
 
     def _run_sine_sweep_loop(self, ao_writer, ai_reader, simulation_mode, volts_to_g_scale,
-                              plant_gain_initial, fs, block_samples):
+                              plant_gain_initial, fs, block_samples, data_logger=None):
         """Execute a sine sweep control loop using current configuration."""
         level_fraction = float(np.clip(self.shared_config.sine_initial_level, 0.0, 1.0))
         start_hz = max(0.01, float(self.shared_config.sine_start_hz))
@@ -1566,8 +1783,8 @@ class ControllerWorker(QObject):
                     )
 
                 target_rms_block = target_vpk / np.sqrt(2.0)
+                target_peak = target_rms_block * np.sqrt(2.0)
                 self.psd_data_ready.emit((f, Pxx, None, self.psd_averaged))
-                target_peak_g = target_vpk * plant_gain
                 self.metrics_data_ready.emit(
                     (
                         a_rms_meas,
@@ -1578,10 +1795,21 @@ class ControllerWorker(QObject):
                         plant_gain,
                         freq,
                         meas_peak,
-                        target_peak_g,
+                        target_peak,
                     )
                 )
                 self.realtime_data_ready.emit(np.array(data, copy=True))
+
+                if data_logger:
+                    data_logger.log_sine_block(
+                        command_block,
+                        np.array(data, copy=True),
+                        level_fraction,
+                        sat_frac,
+                        freq,
+                        meas_peak,
+                        target_peak,
+                    )
 
                 dwell_remaining -= block_duration
 

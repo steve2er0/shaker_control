@@ -1,71 +1,58 @@
 # Random Vibration Shaker Control System
 
-A professional modular system for random vibration testing with multi-band equalization, adaptive control, and comprehensive safety features.
+A professional desktop application for random vibration testing with a modern GUI interface, multi-band equalization, adaptive control, and comprehensive safety features.
 
-## 🏗️ **Modular Architecture**
+## 🖥️ **Desktop Application**
+
+This is a **PySide6-based desktop application** that provides a complete graphical interface for vibration testing. The main entry point is `app.py`, which launches a professional tabbed interface.
 
 ### 📁 **File Structure**
 ```
 shaker_control/
-├── main.py              # Main execution file
-├── config.py            # Configuration parameters
-├── dashboard.py         # Live plotting and visualization
-├── rv_controller.py     # Control algorithms and equalizer
-├── simulation.py        # Plant simulator and mock DAQ
-└── rv_shaker_control.py # Original monolithic file (legacy)
+├── app.py                 # Main desktop application (GUI)
+├── config.py             # Configuration parameters
+├── rv_controller.py      # Control algorithms and equalizer
+├── simulation.py         # Plant simulator and mock DAQ
+├── sine_sweep.py         # Sine sweep testing functionality
+├── README.md             # This documentation
+└── LICENSE               # License file
 ```
-
-### 🎯 **Module Responsibilities**
-
-| Module | Purpose | Key Components |
-|--------|---------|----------------|
-| **main.py** | Orchestration & execution | Main control loop, DAQ setup, error handling |
-| **config.py** | Configuration management | All user parameters, target profiles, safety limits |
-| **dashboard.py** | Visualization | Live PSD plots, control metrics, equalizer gains |
-| **rv_controller.py** | Control algorithms | Multi-band EQ, PI control, safety limiters |
-| **simulation.py** | Plant simulation | Virtual shaker, mock DAQ, realistic dynamics |
 
 ## 🚀 **Quick Start**
 
-### **Simulation Mode (No Hardware Required)**
+### **Launch the Desktop Application**
 ```bash
 python3 app.py
 ```
 
-### **Hardware Mode (Requires NI-DAQ)**
-1. Install DAQ drivers: `pip install nidaqmx`
-2. Edit `config.py`: Set `SIMULATION_MODE = False`
-3. Run: `python3 app.py`
+This opens a professional desktop application with three main tabs:
+- **Configuration**: Adjust all system parameters
+- **Controller**: Start/stop control and view real-time plots
+- **Real-Time Data**: Monitor channel data and PSD analysis
 
-### **Sine Sweep Mode**
-1. Edit `config.py`: set `TEST_MODE = "sine_sweep"`
-2. Configure sweep shape:
-   ```python
-   SINE_SWEEP_START_HZ = 20.0
-   SINE_SWEEP_END_HZ = 2000.0
-   SINE_SWEEP_G_LEVEL = 3.0        # g-peak unless SINE_SWEEP_G_LEVEL_IS_RMS is True
-   SINE_SWEEP_OCTAVES_PER_MIN = 1.0
-   ```
-3. Optional: adjust ramp with `SINE_SWEEP_INITIAL_LEVEL` and `SINE_SWEEP_MAX_LEVEL_RATE`
-4. Run `python3 app.py` (simulation or hardware as above)
+## 🎯 **Application Features**
 
-Sine sweeps now run as stepped, open-loop excitations. Configure the per-step dwell and voltage profile via:
+### **Configuration Tab**
+- **System Parameters**: Sample rate, buffer duration, block duration, Welch segment length
+- **Control Parameters**: PI gains, level fraction settings, slew rate limits
+- **Equalizer Parameters**: Number of bands, adaptation rate, smoothing factor
+- **Safety Limiters**: Crest factor limits, RMS voltage limits
+- **Simulation Parameters**: Plant gain, noise level, simulation mode toggle
 
-```python
-SINE_SWEEP_POINTS_PER_OCTAVE = 12
-SINE_SWEEP_STEP_DWELL = 0.5    # seconds per frequency
-SINE_SWEEP_DEFAULT_VPK = 0.4   # fallback command amplitude (peak volts)
-SINE_SWEEP_DRIVE_SCALE = 1.0   # global multiplier
-SINE_SWEEP_DRIVE_TABLE = [     # optional frequency→voltage pairs
-    (20.0, 0.35),
-    (200.0, 0.35),
-    (2000.0, 0.35),
-]
-```
+### **Controller Tab**
+- **Start/Stop Controls**: Simple button interface to control the vibration system
+- **Real-Time PSD Plot**: Shows measured vs target PSD with logarithmic Y-axis
+- **Control Metrics**: RMS acceleration, level fraction, saturation percentage, plant gain
+- **Equalizer Gains**: Live bar chart showing frequency-dependent gain adjustments
+
+### **Real-Time Data Tab**
+- **Channel RMS History**: Time-series plot of acceleration RMS for each channel
+- **PSD Analysis**: Averaged PSD from controller with target overlay
+- **Multi-Channel Support**: Displays data from multiple accelerometer channels
 
 ## ⚙️ **Configuration**
 
-All parameters are centralized in `config.py`:
+All parameters are centralized in `config.py` and can be modified through the GUI:
 
 ### **Random Vibration Target PSD Profile**
 ```python
@@ -77,32 +64,20 @@ TARGET_PSD_POINTS = [
 ]
 ```
 
-### **Sine Sweep Parameters**
+### **System Parameters**
 ```python
-TEST_MODE = "sine_sweep"            # Switch between 'random' and 'sine_sweep'
-SINE_SWEEP_START_HZ = 20.0
-SINE_SWEEP_END_HZ = 2000.0
-SINE_SWEEP_G_LEVEL = 3.0             # Specify peak-g or RMS via SINE_SWEEP_G_LEVEL_IS_RMS
-SINE_SWEEP_G_LEVEL_IS_RMS = False
-SINE_SWEEP_OCTAVES_PER_MIN = 1.0
-SINE_SWEEP_REPEAT = True             # Automatically restart when the sweep finishes
-SINE_SWEEP_INITIAL_LEVEL = 0.2       # Fraction of target to start from (smooth ramp)
-SINE_SWEEP_MAX_LEVEL_RATE = 0.5      # Fraction per second ramp rate
-SINE_SWEEP_POINTS_PER_OCTAVE = 12    # Log spacing density
-SINE_SWEEP_STEP_DWELL = 0.5          # Seconds to dwell at each frequency
-SINE_SWEEP_DEFAULT_VPK = 0.4         # Default peak command when no table entry exists
-SINE_SWEEP_DRIVE_SCALE = 1.0         # Global amplitude multiplier
-SINE_SWEEP_DRIVE_TABLE = [           # Optional drive table for repeatable excitation
-    (20.0, 0.35),
-    (200.0, 0.35),
-    (2000.0, 0.35),
-]
+FS = 51200.0                    # Sample rate [Hz]
+BUF_SECONDS = 5.0               # Buffer duration [s]
+BLOCK_SECONDS = 2.0             # Processing block duration [s]
+WELCH_NPERSEG = 2048            # Welch PSD segment length
+AO_VOLT_LIMIT = 2.0             # Maximum output voltage [V]
 ```
 
 ### **Control Tuning**
 ```python
 KP = 2.0                        # Proportional gain
 KI = 0.5                        # Integral gain
+INITIAL_LEVEL_FRACTION = 0.10   # Starting level (10% of target)
 MAX_LEVEL_FRACTION_RATE = 0.5   # Slew rate limit
 ```
 
@@ -110,48 +85,85 @@ MAX_LEVEL_FRACTION_RATE = 0.5   # Slew rate limit
 ```python
 MAX_CREST_FACTOR = 6.0          # Peak/RMS ratio limit
 MAX_RMS_VOLTS = 1.8             # RMS voltage limit
-AO_VOLT_LIMIT = 2.0             # Absolute peak limit
 ```
 
-## 📊 **Features**
+### **Simulation Mode**
+```python
+SIMULATION_MODE = True          # Enable simulation (no hardware required)
+SIM_PLANT_GAIN = 4.0           # Plant gain [g/V]
+SIM_NOISE_LEVEL = 0.02         # Measurement noise [g RMS]
+```
 
-### **Advanced Control**
-- ✅ **Multi-band equalizer** (12 frequency bands)
-- ✅ **PI control** with anti-windup
-- ✅ **Plant gain estimation** (adaptive)
-- ✅ **Target PSD shaping** (custom profiles)
-- ✅ **Repeatable sine sweep excitation** using stepwise drive tables
+### **Data Logging**
+```python
+DATA_LOG_ENABLED = False       # Enable HDF5 + CSV logging
+DATA_LOG_DIR = "data_logs"     # Output directory for recorded runs
+```
+
+When enabled, each run records raw AO/AI blocks to an HDF5 file and writes a
+lightweight CSV summary (random vibration: PSD of the last block; sine sweep:
+measured g-peak vs frequency).
+
+## 🔧 **Hardware Setup**
+
+### **Simulation Mode (Default)**
+- No hardware required
+- Realistic plant simulation with resonances and noise
+- Perfect for testing and development
+
+### **Hardware Mode**
+1. Install NI-DAQ drivers: `pip install nidaqmx`
+2. In the Configuration tab, uncheck "Enable Simulation Mode"
+3. Configure your DAQ device channels in `config.py`:
+   ```python
+   DEVICE_AI = "Dev1/ai0"       # Input channel
+   DEVICE_AO = "Dev1/ao0"       # Output channel
+   ACCEL_MV_PER_G = 100.0       # Accelerometer sensitivity [mV/g]
+   ```
+
+## 📊 **Advanced Features**
+
+### **Multi-Band Equalizer**
+- **12 frequency bands** with logarithmic spacing
+- **Adaptive gain adjustment** based on measured vs target PSD
+- **Smooth adaptation** to prevent oscillations
+- **Real-time visualization** of gain adjustments
+
+### **Intelligent Control**
+- **PI control** with anti-windup protection
+- **Plant gain estimation** for adaptive scaling
+- **Saturation detection** with automatic backoff
+- **Level fraction control** for smooth ramping
 
 ### **Safety Systems**
-- ✅ **Crest factor limiting** (soft compression)
-- ✅ **RMS voltage limiting** (thermal protection)
-- ✅ **Saturation protection** (automatic backoff)
-- ✅ **NaN/inf detection** (numerical stability)
+- **Crest factor limiting** with soft compression
+- **RMS voltage limiting** for thermal protection
+- **Hard voltage clipping** as final safety net
+- **NaN/inf detection** for numerical stability
 
-### **Professional Dashboard**
-- ✅ **Live PSD plots** (measured vs target)
-- ✅ **Control metrics** (RMS, level, saturation)
-- ✅ **Equalizer gains** (real-time adaptation)
-- ✅ **Plant identification** (gain estimation)
+### **Professional Visualization**
+- **PyQtGraph-based plotting** for high performance
+- **Real-time updates** at 30+ FPS
+- **Logarithmic PSD scaling** for better visualization
+- **Fixed frequency ranges** (20-2000 Hz) for consistency
 
-### **Realistic Simulation**
-- ✅ **Plant dynamics** (resonances, delays, nonlinearity)
-- ✅ **Measurement noise** (realistic sensor simulation)
-- ✅ **Mock DAQ interface** (seamless hardware transition)
+## 🎮 **Usage Workflow**
 
-## 🔧 **Customization**
+1. **Launch Application**: Run `python3 app.py`
+2. **Configure System**: Go to Configuration tab and adjust parameters
+3. **Apply Settings**: Click "Apply Configuration" button
+4. **Start Control**: Go to Controller tab and click "Start Controller"
+5. **Monitor Performance**: Watch real-time plots and metrics
+6. **Stop When Done**: Click "Stop Controller" to halt the system
 
-### **Modify Target Profile**
-Edit `TARGET_PSD_POINTS` in `config.py` to change your vibration profile.
+## 🛡️ **Safety Features**
 
-### **Tune Control Performance**
-Adjust `KP`, `KI`, and `MAX_LEVEL_FRACTION_RATE` for different response characteristics.
-
-### **Safety Limits**
-Modify `MAX_CREST_FACTOR`, `MAX_RMS_VOLTS`, and `AO_VOLT_LIMIT` based on your hardware capabilities.
-
-### **Simulation Parameters**
-Change `SIM_PLANT_GAIN`, `SIM_RESONANCES`, and `SIM_NOISE_LEVEL` to model different shaker systems.
+Multiple layers of protection ensure safe operation:
+1. **Software limits**: Crest factor and RMS limiting
+2. **Hardware limits**: Absolute voltage clipping
+3. **Adaptive control**: Automatic saturation backoff
+4. **Error handling**: NaN/inf detection and recovery
+5. **GUI feedback**: Real-time status and error messages
 
 ## 📈 **Performance**
 
@@ -162,12 +174,22 @@ The system demonstrates:
 - **Fast adaptation**: Equalizer learns plant response quickly
 - **Professional monitoring**: Comprehensive real-time dashboard
 
-## 🛡️ **Safety**
+## 🔄 **Sine Sweep Testing**
 
-Multiple layers of protection:
-1. **Software limits**: Crest factor and RMS limiting
-2. **Hardware limits**: Absolute voltage clipping
-3. **Adaptive control**: Automatic saturation backoff
-4. **Error handling**: NaN/inf detection and recovery
+For sine sweep testing, use the dedicated `sine_sweep.py` module:
+```bash
+python3 sine_sweep.py
+```
 
-Your system is now production-ready for professional vibration testing! 🎯✨
+This provides specialized sine sweep functionality with configurable frequency ranges, sweep rates, and amplitude profiles.
+
+## 🎯 **Production Ready**
+
+This system is designed for professional vibration testing with:
+- **Robust error handling** and recovery
+- **Professional GUI** with intuitive controls
+- **Comprehensive logging** and status reporting
+- **Hardware abstraction** for easy DAQ integration
+- **Modular architecture** for easy customization
+
+Perfect for research, development, and production vibration testing applications! 🎯✨
