@@ -266,9 +266,15 @@ class HardwareSession(MeasurementSession):
 
     def clear_output(self) -> None:
         zero_block = np.zeros(self.block_samples, dtype=np.float64)
+        scratch = np.empty(self.block_samples, dtype=np.float64)
         for _ in range(4):
             try:
                 self._writer.write_many_sample(zero_block, timeout=self._timeout)
+                self._reader.read_many_sample(
+                    scratch,
+                    number_of_samples_per_channel=self.block_samples,
+                    timeout=self._timeout,
+                )
             except Exception:
                 break
 
@@ -409,14 +415,14 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
         default=0.05,
         help="Acceptable absolute peak error in g",
     )
-    parser.add_argument("--max-iterations", type=int, default=8)
+    parser.add_argument("--max-iterations", type=int, default=10)
     parser.add_argument("--settle-blocks", type=int, default=1)
     parser.add_argument("--measure-blocks", type=int, default=1)
-    parser.add_argument("--fs", type=float, default=getattr(config, "FS", 8192.0))
+    parser.add_argument("--fs", type=float, default=getattr(config, "FS", 51200.0))
     parser.add_argument(
         "--block-seconds",
         type=float,
-        default=getattr(config, "BLOCK_SECONDS", 0.5),
+        default=getattr(config, "BLOCK_SECONDS", 2.0),
         help="Length of each write/read block in seconds",
     )
     parser.add_argument(
