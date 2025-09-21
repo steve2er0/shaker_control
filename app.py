@@ -60,6 +60,7 @@ from sine_sweep import (
     LogSweepStepper,
     SineOscillator,
     build_drive_lookup,
+    target_g_rms,
 )
 
 
@@ -1688,11 +1689,26 @@ class ControllerWorker(QObject):
             repeat=bool(self.shared_config.sine_repeat),
         )
         oscillator = SineOscillator(fs, stepper.current_frequency())
-        dwell_seconds = max(self.shared_config.sine_step_dwell, block_duration)
+        octaves_per_min = float(self.shared_config.sine_octaves_per_min)
+        if abs(octaves_per_min) > 0.0:
+            dwell_from_rate = 60.0 / (abs(octaves_per_min) * points_per_octave)
+        else:
+            dwell_from_rate = 0.0
+        dwell_seconds = max(
+            self.shared_config.sine_step_dwell,
+            block_duration,
+            dwell_from_rate,
+        )
         lookup_drive = build_drive_lookup(
             self.shared_config.sine_drive_table,
             self.shared_config.sine_default_vpk,
         )
+
+        target_g_rms_value = target_g_rms(
+            self.shared_config.sine_g_level,
+            self.shared_config.sine_g_level_is_rms,
+        )
+        target_g_peak = target_g_rms_value * math.sqrt(2.0)
 
         self.eq_data_ready.emit(None)
         self.psd_averaged = None
@@ -1702,16 +1718,21 @@ class ControllerWorker(QObject):
             oscillator.set_frequency(freq)
             dwell_remaining = dwell_seconds
 
-            drive_vpk = lookup_drive(freq) * self.shared_config.sine_drive_scale
-            drive_vpk = max(0.0, drive_vpk)
+            drive_vpk = max(0.0, lookup_drive(freq) * self.shared_config.sine_drive_scale)
+            preview_target_peak_g = target_g_peak * max(level_fraction, 0.0)
+            preview_target_vpk = drive_vpk * preview_target_peak_g
 
-            print(f"Sine sweep step: {freq:.1f} Hz, command ≈ {drive_vpk:.3f} Vpk")
+            print(
+                f"Sine sweep step: {freq:.1f} Hz, command ~= {preview_target_vpk:.3f} Vpk "
+                f"(target ~= {preview_target_peak_g:.3f} gpk)"
+            )
 
             while dwell_remaining > 1e-9 and not self.should_stop.is_set():
                 loop_start = time.perf_counter()
                 sin_block, cos_block = oscillator.generate(block_samples)
 
-                target_vpk = drive_vpk * max(level_fraction, 0.0)
+                target_peak_g_current = target_g_peak * max(level_fraction, 0.0)
+                target_vpk = drive_vpk * target_peak_g_current
                 command_block = target_vpk * sin_block
 
                 command_block, limiter_stats = apply_safety_limiters(
@@ -1791,7 +1812,7 @@ class ControllerWorker(QObject):
                     )
 
                 target_rms_block = target_vpk / np.sqrt(2.0)
-                target_peak = target_rms_block * np.sqrt(2.0)
+                target_peak = target_peak_g_current
                 self.psd_data_ready.emit((f, Pxx, None, self.psd_averaged))
                 self.metrics_data_ready.emit(
                     (
