@@ -24,10 +24,10 @@ INPUT_CHANNEL_LABELS = [
 TEST_MODE = "random"
 
 # ============= SYSTEM PARAMETERS =============
-FS = 8192.0                # Sample rate [Hz]
+FS = 51200.0                # Sample rate [Hz]
 BUF_SECONDS = 4           # Buffer size for AO/AI streaming
-BLOCK_SECONDS = 0.5         # Processing block duration
-WELCH_NPERSEG = 1024        # Welch segment length (power of 2)
+BLOCK_SECONDS = 1         # Processing block duration
+WELCH_NPERSEG = 4096        # Welch segment length (power of 2)
 
 # ============= TARGET PSD PROFILE =============
 # List of (frequency [Hz], PSD level [g^2/Hz]) pairs
@@ -75,9 +75,14 @@ SINE_SWEEP_STEP_DWELL = 0.5    # Dwell time per frequency step [s]
 SINE_SWEEP_DEFAULT_VPK = 0.4   # Default drive amplitude (peak volts) when no table provided
 SINE_SWEEP_DRIVE_SCALE = 1.0   # Global scale factor applied to the drive table/default
 SINE_SWEEP_DRIVE_TABLE = [     # Optional list of (frequency [Hz], peak volts)
-    (20.0, 0.35),
-    (200.0, 0.35),
-    (2000.0, 0.35),
+    (20.000000, 0.781627),
+    (40.000000, 0.257444),
+    (80.000000, 0.115932),
+    (160.000000, 0.070388),
+    (320.000000, 0.073042),
+    (640.000000, 0.072070),
+    (1280.000000, 0.083739),
+    (2000.000000, 0.081658)
 ]
 
 # ============= DATA LOGGING =============
