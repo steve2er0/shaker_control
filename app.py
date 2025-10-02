@@ -179,9 +179,16 @@ class DataLogger:
         self.timestamps.append(time.time())
         self.level_fraction.append(float(level_fraction))
         self.sat_fraction.append(float(sat_frac))
-        self.sine_freqs.append(float(freq_hz))
-        self.sine_peak_meas.append(float(peak_meas))
-        self.sine_peak_target.append(float(peak_target))
+        freq_val = float(freq_hz)
+        peak_meas_val = float(peak_meas)
+        peak_target_val = float(peak_target)
+        if self.sine_freqs and math.isclose(self.sine_freqs[-1], freq_val, rel_tol=1e-6, abs_tol=1e-3):
+            self.sine_peak_meas[-1] = max(self.sine_peak_meas[-1], peak_meas_val)
+            self.sine_peak_target[-1] = max(self.sine_peak_target[-1], peak_target_val)
+        else:
+            self.sine_freqs.append(freq_val)
+            self.sine_peak_meas.append(peak_meas_val)
+            self.sine_peak_target.append(peak_target_val)
 
     def _write_random_preview(self):
         if self.last_ai_block is None:
@@ -295,6 +302,7 @@ class SharedConfig(QObject):
 
         self.sine_initial_level = float(sine_initial_default)
         self.sine_max_level_rate = float(sine_rate_default)
+        self.sine_initial_settle = float(max(0.0, getattr(config, 'SINE_SWEEP_INITIAL_SETTLE', 0.0)))
         
         # Equalizer parameters
         self.eq_num_bands = config.EQ_NUM_BANDS
@@ -460,6 +468,12 @@ class ConfigurationTab(QWidget):
         self.sine_max_level_rate_spin.setDecimals(2)
         sine_layout.addRow("Max Level Rate:", self.sine_max_level_rate_spin)
 
+        self.sine_initial_settle_spin = QDoubleSpinBox()
+        self.sine_initial_settle_spin.setRange(0.0, 30.0)
+        self.sine_initial_settle_spin.setDecimals(2)
+        self.sine_initial_settle_spin.setSuffix(" s")
+        sine_layout.addRow("Initial Settle Time:", self.sine_initial_settle_spin)
+
         self.sine_group.setLayout(sine_layout)
 
         # Equalizer Parameters Group
@@ -578,6 +592,7 @@ class ConfigurationTab(QWidget):
         self.sine_repeat_check.setChecked(self.shared_config.sine_repeat)
         self.sine_initial_level_spin.setValue(self.shared_config.sine_initial_level)
         self.sine_max_level_rate_spin.setValue(self.shared_config.sine_max_level_rate)
+        self.sine_initial_settle_spin.setValue(self.shared_config.sine_initial_settle)
 
         self.data_log_check.setChecked(self.shared_config.data_log_enabled)
 
@@ -616,6 +631,7 @@ class ConfigurationTab(QWidget):
         self.shared_config.sine_repeat = self.sine_repeat_check.isChecked()
         self.shared_config.sine_initial_level = self.sine_initial_level_spin.value()
         self.shared_config.sine_max_level_rate = self.sine_max_level_rate_spin.value()
+        self.shared_config.sine_initial_settle = self.sine_initial_settle_spin.value()
 
         self.shared_config.data_log_enabled = self.data_log_check.isChecked()
 
@@ -1227,9 +1243,16 @@ class RealTimeDataTab(QWidget):
     def update_sine_metrics(self, freq_hz: float, peak_g: float, target_peak_g: float):
         if not self._is_sine_mode() or not self.is_streaming:
             return
-        self.sine_freq_history.append(float(freq_hz))
-        self.sine_peak_history.append(float(peak_g))
-        self.sine_target_history.append(float(target_peak_g))
+        freq_val = float(freq_hz)
+        peak_val = float(peak_g)
+        target_val = float(target_peak_g)
+        if self.sine_freq_history and math.isclose(self.sine_freq_history[-1], freq_val, rel_tol=1e-6, abs_tol=1e-3):
+            self.sine_peak_history[-1] = max(self.sine_peak_history[-1], peak_val)
+            self.sine_target_history[-1] = max(self.sine_target_history[-1], target_val)
+        else:
+            self.sine_freq_history.append(freq_val)
+            self.sine_peak_history.append(peak_val)
+            self.sine_target_history.append(target_val)
 
 
 class ControllerWorker(QObject):
@@ -1712,11 +1735,13 @@ class ControllerWorker(QObject):
 
         self.eq_data_ready.emit(None)
         self.psd_averaged = None
+        first_step = True
 
         while not self.should_stop.is_set():
             freq = stepper.current_frequency()
             oscillator.set_frequency(freq)
-            dwell_remaining = dwell_seconds
+            extra_settle = self.shared_config.sine_initial_settle if first_step else 0.0
+            dwell_remaining = dwell_seconds + max(0.0, float(extra_settle))
 
             drive_vpk = max(0.0, lookup_drive(freq) * self.shared_config.sine_drive_scale)
             preview_target_peak_g = target_g_peak * max(level_fraction, 0.0)
@@ -1729,7 +1754,7 @@ class ControllerWorker(QObject):
 
             while dwell_remaining > 1e-9 and not self.should_stop.is_set():
                 loop_start = time.perf_counter()
-                sin_block, cos_block = oscillator.generate(block_samples)
+                sin_block, _ = oscillator.generate(block_samples)
 
                 target_peak_g_current = target_g_peak * max(level_fraction, 0.0)
                 target_vpk = drive_vpk * target_peak_g_current
@@ -1777,13 +1802,13 @@ class ControllerWorker(QObject):
                 else:
                     accel_data = data[0] if data.ndim == 2 else data
 
-                scale = 2.0 / float(len(command_block))
-                cmd_peak = scale * float(np.hypot(np.dot(command_block, sin_block), np.dot(command_block, cos_block)))
-                meas_peak = scale * float(np.hypot(np.dot(accel_data, sin_block), np.dot(accel_data, cos_block)))
-                a_rms_meas = meas_peak / np.sqrt(2.0)
+                cmd_rms = float(np.std(command_block))
+                meas_rms = float(np.std(accel_data))
+                meas_peak = meas_rms * math.sqrt(2.0)
+                a_rms_meas = meas_rms
 
-                if cmd_peak > 1e-9:
-                    new_gain = meas_peak / cmd_peak
+                if cmd_rms > 1e-9:
+                    new_gain = meas_rms / cmd_rms
                     plant_gain = 0.8 * plant_gain + 0.2 * new_gain
 
                 now = time.time()
@@ -1853,6 +1878,7 @@ class ControllerWorker(QObject):
                     if remaining > 0:
                         time.sleep(remaining)
 
+            first_step = False
             if not stepper.advance():
                 if not self.shared_config.sine_repeat:
                     self.status_message.emit("Sine sweep complete")

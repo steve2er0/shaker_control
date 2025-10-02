@@ -70,6 +70,7 @@ SINE_SWEEP_OCTAVES_PER_MIN = 1.0
 SINE_SWEEP_REPEAT = True        # Restart sweep automatically when end reached
 SINE_SWEEP_INITIAL_LEVEL = 0.2  # Fraction of target level to start from
 SINE_SWEEP_MAX_LEVEL_RATE = 0.5 # Max change in level fraction per second
+SINE_SWEEP_INITIAL_SETTLE = 3.0 # Extra dwell at first step [s]
 SINE_SWEEP_POINTS_PER_OCTAVE = 12
 SINE_SWEEP_STEP_DWELL = 0.5    # Dwell time per frequency step [s]
 SINE_SWEEP_DEFAULT_VPK = 0.4   # Default drive amplitude (peak volts) when no table provided
