@@ -34,11 +34,12 @@ try:  # Optional hardware support
         AccelUnits,
         Coupling,
         ExcitationSource,
+        OverwriteMode,
         TerminalConfiguration,
         VoltageUnits,
     )
     from nidaqmx.errors import DaqError
-    from nidaqmx.stream_readers import AnalogMultiChannelReader
+    from nidaqmx.stream_readers import AnalogMultiChannelReader, AnalogSingleChannelReader
 
     NIDAQ_AVAILABLE = True
 except ImportError:  # pragma: no cover - hardware optional
@@ -50,7 +51,9 @@ except ImportError:  # pragma: no cover - hardware optional
     ExcitationSource = None
     TerminalConfiguration = None
     VoltageUnits = None
+    OverwriteMode = None
     AnalogMultiChannelReader = None
+    AnalogSingleChannelReader = None
     DaqError = None
     NIDAQ_AVAILABLE = False
 
@@ -115,15 +118,27 @@ class BaseAcquisitionSession:
 def _resolve_terminal_config(name: str) -> Optional[TerminalConfiguration]:
     if TerminalConfiguration is None:
         return None
+
+    cleaned = (name or "").strip().upper()
+    default = getattr(TerminalConfiguration, 'DEFAULT', None)
+
+    def _get(*candidates):
+        for candidate in candidates:
+            if candidate and hasattr(TerminalConfiguration, candidate):
+                return getattr(TerminalConfiguration, candidate)
+        return default
+
     mapping = {
-        "DEFAULT": TerminalConfiguration.DEFAULT,
-        "DIFF": TerminalConfiguration.DIFFERENTIAL,
-        "DIFFERENTIAL": TerminalConfiguration.DIFFERENTIAL,
-        "NRSE": TerminalConfiguration.NRSE,
-        "PSEUDO_DIFF": TerminalConfiguration.PSEUDO_DIFF,
-        "RSE": TerminalConfiguration.RSE,
+        'DEFAULT': _get('DEFAULT'),
+        'DIFF': _get('DIFFERENTIAL', 'DIFF'),
+        'DIFFERENTIAL': _get('DIFFERENTIAL', 'DIFF'),
+        'NRSE': _get('NRSE'),
+        'PSEUDO_DIFF': _get('PSEUDO_DIFF', 'PSEUDODIFFERENTIAL'),
+        'PSEUDODIFF': _get('PSEUDO_DIFF', 'PSEUDODIFFERENTIAL'),
+        'RSE': _get('RSE'),
     }
-    return mapping.get(name.upper(), TerminalConfiguration.DEFAULT)
+
+    return mapping.get(cleaned, default)
 
 
 class NIDaqSession(BaseAcquisitionSession):
@@ -134,7 +149,8 @@ class NIDaqSession(BaseAcquisitionSession):
         self._fs = float(fs)
         self._block = int(block_samples)
         self._task: Optional[nidaqmx.Task] = None
-        self._reader: Optional[AnalogMultiChannelReader] = None
+        self._reader: Optional[object] = None
+        self._use_single_reader = len(self._channels) == 1 and AnalogSingleChannelReader is not None
         self._scales: Optional[np.ndarray] = None
         self._stopping = False
         self.description = "NI-DAQ"  # refined during start
@@ -142,86 +158,125 @@ class NIDaqSession(BaseAcquisitionSession):
     def start(self) -> None:
         num_channels = len(self._channels)
         task = nidaqmx.Task()
+        self._task = task
         scales = np.ones(num_channels, dtype=np.float64)
         mode_tags: List[str] = []
 
-        for idx, spec in enumerate(self._channels):
-            term_cfg = _resolve_terminal_config(spec.terminal_config)
-            volts_per_g = spec.sensitivity_mV_per_g / 1000.0
-            g_range_guess = max(spec.voltage_range / max(volts_per_g, 1e-9), 0.5)
-            excitation_source = ExcitationSource.INTERNAL if spec.excitation_current_amps > 0 else ExcitationSource.NONE
+        try:
+            for idx, spec in enumerate(self._channels):
+                term_cfg = _resolve_terminal_config(spec.terminal_config)
+                volts_per_g = spec.sensitivity_mV_per_g / 1000.0
+                g_range_guess = max(spec.voltage_range / max(volts_per_g, 1e-9), 0.5)
+                excitation_source = ExcitationSource.INTERNAL if spec.excitation_current_amps > 0 else ExcitationSource.NONE
 
-            added = False
-            mode_tag = "voltage"
-            if spec.use_accel_channel:
-                try:
-                    accel_chan = task.ai_channels.add_ai_accel_chan(
+                added = False
+                mode_tag = "voltage"
+                if spec.use_accel_channel:
+                    try:
+                        accel_chan = task.ai_channels.add_ai_accel_chan(
+                            physical_channel=spec.physical_channel,
+                            name_to_assign_to_channel=spec.label,
+                            terminal_config=term_cfg,
+                            min_val=-g_range_guess,
+                            max_val=g_range_guess,
+                            units=AccelUnits.G,
+                            sensitivity=spec.sensitivity_mV_per_g,
+                            sensitivity_units=AccelSensitivityUnits.MILLIVOLTS_PER_G,
+                            current_excit_source=excitation_source,
+                            current_excit_val=spec.excitation_current_amps,
+                        )
+                        try:
+                            accel_chan.ai_coupling = Coupling.AC
+                        except Exception:
+                            pass
+                        scales[idx] = 1.0
+                        mode_tag = "accel"
+                        added = True
+                    except Exception as accel_err:
+                        print(f"Accelerometer channel setup failed for {spec.physical_channel}: {accel_err}")
+
+                if not added:
+                    voltage_range = max(spec.voltage_range, 0.5)
+                    task.ai_channels.add_ai_voltage_chan(
                         physical_channel=spec.physical_channel,
                         name_to_assign_to_channel=spec.label,
                         terminal_config=term_cfg,
-                        min_val=-g_range_guess,
-                        max_val=g_range_guess,
-                        units=AccelUnits.G,
-                        sensitivity=spec.sensitivity_mV_per_g,
-                        sensitivity_units=AccelSensitivityUnits.MILLIVOLTS_PER_G,
-                        current_excit_source=excitation_source,
-                        current_excit_val=spec.excitation_current_amps,
+                        min_val=-voltage_range,
+                        max_val=voltage_range,
+                        units=VoltageUnits.VOLTS,
                     )
-                    try:
-                        accel_chan.ai_coupling = Coupling.AC
-                    except Exception:
-                        pass
-                    scales[idx] = 1.0
-                    mode_tag = "accel"
-                    added = True
-                except Exception as accel_err:
-                    print(f"Accelerometer channel setup failed for {spec.physical_channel}: {accel_err}")
+                    scales[idx] = 1.0 / max(volts_per_g, 1e-9)
+                mode_tags.append(mode_tag)
 
-            if not added:
-                voltage_range = max(spec.voltage_range, 0.5)
-                task.ai_channels.add_ai_voltage_chan(
-                    physical_channel=spec.physical_channel,
-                    name_to_assign_to_channel=spec.label,
-                    terminal_config=term_cfg,
-                    min_val=-voltage_range,
-                    max_val=voltage_range,
-                    units=VoltageUnits.VOLTS,
-                )
-                scales[idx] = 1.0 / max(volts_per_g, 1e-9)
-            mode_tags.append(mode_tag)
+            samp_per_chan = max(self._block * 4, self._block)
+            task.timing.cfg_samp_clk_timing(
+                rate=self._fs,
+                sample_mode=AcquisitionType.CONTINUOUS,
+                samps_per_chan=samp_per_chan,
+            )
 
-        samp_per_chan = max(self._block * 4, self._block)
-        task.timing.cfg_samp_clk_timing(
-            rate=self._fs,
-            sample_mode=AcquisitionType.CONTINUOUS,
-            samps_per_chan=samp_per_chan,
-        )
-        try:
-            desired_buf = max(samp_per_chan * 2, task.in_stream.input_buf_size)
-            task.in_stream.input_buf_size = desired_buf
+            min_host_buffer = int(max(self._fs * 0.5, self._block * 32, samp_per_chan * 4))
+            try:
+                current_size = task.in_stream.input_buf_size
+                desired_buf = max(min_host_buffer, current_size)
+                task.in_stream.input_buf_size = desired_buf
+            except Exception:
+                pass
+
+            if OverwriteMode is not None:
+                try:
+                    task.in_stream.overwrite_mode = OverwriteMode.OVERWRITE_UNREAD_SAMPLES
+                except Exception:
+                    pass
+
+            self._use_single_reader = len(self._channels) == 1 and AnalogSingleChannelReader is not None
+            if self._use_single_reader:
+                reader = AnalogSingleChannelReader(task.in_stream)
+            else:
+                reader = AnalogMultiChannelReader(task.in_stream)
+            task.start()
+
+            self._reader = reader
+            self._scales = scales
+            self._stopping = False
+            self.description = "NI-DAQ (" + ", ".join(mode_tags) + ")"
         except Exception:
-            pass
-
-        reader = AnalogMultiChannelReader(task.in_stream)
-        task.start()
-
-        self._task = task
-        self._reader = reader
-        self._scales = scales
-        self._stopping = False
-        self.description = "NI-DAQ (" + ", ".join(mode_tags) + ")"
+            self._reader = None
+            self._scales = None
+            self._stopping = False
+            try:
+                task.stop()
+            except Exception:
+                pass
+            try:
+                task.close()
+            except Exception:
+                pass
+            self._task = None
+            raise
 
     def read_block(self) -> np.ndarray:
         if self._reader is None or self._scales is None:
             raise RuntimeError("Session not started")
-        buf = np.empty((len(self._channels), self._block), dtype=np.float64)
-        timeout = max(self._block / max(self._fs, 1e-9) * 2.0, 0.2)
+        timeout = max(self._block / max(self._fs, 1e-9) * 4.0, 0.5)
+        reader = self._reader
         try:
-            self._reader.read_many_sample(
-                buf,
-                number_of_samples_per_channel=self._block,
-                timeout=timeout,
-            )
+            if self._use_single_reader and AnalogSingleChannelReader is not None:
+                buf_single = np.empty(self._block, dtype=np.float64)
+                reader.read_many_sample(  # type: ignore[attr-defined]
+                    buf_single,
+                    number_of_samples_per_channel=self._block,
+                    timeout=timeout,
+                )
+                buf = buf_single[np.newaxis, :]
+            else:
+                buf_multi = np.empty((len(self._channels), self._block), dtype=np.float64)
+                reader.read_many_sample(  # type: ignore[attr-defined]
+                    buf_multi,
+                    number_of_samples_per_channel=self._block,
+                    timeout=timeout,
+                )
+                buf = buf_multi
         except DaqError as err:
             if self._stopping:
                 return np.empty((len(self._channels), 0), dtype=np.float64)
@@ -294,18 +349,30 @@ class AcquisitionWorker(QThread):
 
     def run(self) -> None:
         try:
+            print('AcquisitionWorker: creating session...', flush=True)
             self._session = self._session_factory()
+            print('AcquisitionWorker: starting session...', flush=True)
             self._session.start()
-            if getattr(self._session, "description", ""):
-                self.mode_info.emit(self._session.description)
-            self.status.emit("running")
+            description = getattr(self._session, 'description', '')
+            if description:
+                self.mode_info.emit(description)
+                print(f'AcquisitionWorker: session started ({description})', flush=True)
+            else:
+                print('AcquisitionWorker: session started', flush=True)
+            self.status.emit('running')
             while not self._should_stop:
                 block = self._session.read_block()
                 if block.size == 0:
                     continue
                 self.data_ready.emit(block)
         except Exception as exc:  # pragma: no cover - runtime error channel
-            self.error.emit(str(exc))
+            print('AcquisitionWorker: exception during run:', exc, flush=True)
+            import traceback as _tb  # local import to avoid global dependency if optional
+            _tb.print_exc()
+            message = str(exc).strip()
+            if not message:
+                message = exc.__class__.__name__
+            self.error.emit(message)
         finally:
             if self._session is not None:
                 try:
@@ -316,14 +383,17 @@ class AcquisitionWorker(QThread):
                     self._session.close()
                 except Exception:
                     pass
-            self.status.emit("stopped")
+            self.status.emit('stopped')
 
     def stop(self) -> None:
+        print('AcquisitionWorker: stop() called', flush=True)
         self._should_stop = True
         if self._session is not None:
             try:
                 self._session.stop()
+                print('AcquisitionWorker: session.stop() issued', flush=True)
             except Exception:
+                print('AcquisitionWorker: error during session.stop()', flush=True)
                 pass
 
 
@@ -441,11 +511,14 @@ class MonitorWindow(QMainWindow):
         self._worker.start()
 
     def _stop_acquisition(self) -> None:
-        if not self._worker:
+        worker = self._worker
+        if not worker:
+            print('GUI: stop ignored (no worker)', flush=True)
             return
-        self._status_label.setText("Stopping…")
+        print('GUI: stop requested', flush=True)
+        self._status_label.setText('Stopping...')
         self._start_button.setEnabled(False)
-        self._worker.stop()
+        worker.stop()
 
     def _reset_buffers(self) -> None:
         self._buffer.fill(0.0)
@@ -520,6 +593,7 @@ class MonitorWindow(QMainWindow):
             curve.setData(freqs, pxx)
 
     def _handle_worker_status(self, state: str) -> None:
+        print(f'GUI: worker status -> {state}', flush=True)
         if state == "running":
             self._status_label.setText("Running")
             self._start_button.setText("Stop")
@@ -538,8 +612,11 @@ class MonitorWindow(QMainWindow):
         self._mode_label.setText(f"Mode: {description}")
 
     def _on_worker_finished(self) -> None:
+        print('GUI: worker finished', flush=True)
         self._worker = None
-
+        self._start_button.setText("Start")
+        self._start_button.setEnabled(True)
+        self._status_label.setText("Stopped")
     def _on_psd_window_change(self, value: float) -> None:
         self._psd_window_sec = float(value)
         self._psd_window_samples = max(int(self._psd_window_sec * self._fs), 32)
@@ -549,7 +626,6 @@ class MonitorWindow(QMainWindow):
             self._worker.stop()
             self._worker.wait(1500)
         super().closeEvent(event)
-
 
 def main() -> None:
     app = QApplication(sys.argv)
