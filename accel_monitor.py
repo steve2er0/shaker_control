@@ -258,7 +258,7 @@ class NIDaqSession(BaseAcquisitionSession):
     def read_block(self) -> np.ndarray:
         if self._reader is None or self._scales is None:
             raise RuntimeError("Session not started")
-        timeout = max(self._block / max(self._fs, 1e-9) * 4.0, 0.5)
+        timeout = max(self._block / max(self._fs, 1e-9) * 1.5, 0.1)
         reader = self._reader
         try:
             if self._use_single_reader and AnalogSingleChannelReader is not None:
@@ -448,8 +448,13 @@ class MonitorWindow(QMainWindow):
         controls.setSpacing(12)
 
         self._start_button = QPushButton("Start")
-        self._start_button.clicked.connect(self._toggle_acquisition)
+        self._start_button.clicked.connect(self._start_acquisition)
         controls.addWidget(self._start_button, 0, Qt.AlignLeft)
+
+        self._stop_button = QPushButton("Stop")
+        self._stop_button.setEnabled(False)
+        self._stop_button.clicked.connect(self._stop_acquisition)
+        controls.addWidget(self._stop_button, 0, Qt.AlignLeft)
 
         controls.addWidget(QLabel("PSD window (s):"))
         self._psd_spin = QDoubleSpinBox()
@@ -480,16 +485,13 @@ class MonitorWindow(QMainWindow):
             self._time_curves.append(self._time_plot.plot(pen=pen, name=spec.label))
             self._psd_curves.append(self._psd_plot.plot(pen=pen, name=spec.label))
 
-    def _toggle_acquisition(self) -> None:
-        if self._worker and self._worker.isRunning():
-            self._stop_acquisition()
-        else:
-            self._start_acquisition()
-
     def _start_acquisition(self) -> None:
+        if self._worker and self._worker.isRunning():
+            return
         self._reset_buffers()
         self._start_button.setEnabled(False)
-        self._status_label.setText("Starting…")
+        self._stop_button.setEnabled(False)
+        self._status_label.setText("Starting...")
 
         def factory() -> BaseAcquisitionSession:
             if cfg.SIMULATION_MODE or not NIDAQ_AVAILABLE:
@@ -513,11 +515,9 @@ class MonitorWindow(QMainWindow):
     def _stop_acquisition(self) -> None:
         worker = self._worker
         if not worker:
-            print('GUI: stop ignored (no worker)', flush=True)
             return
-        print('GUI: stop requested', flush=True)
-        self._status_label.setText('Stopping...')
-        self._start_button.setEnabled(False)
+        self._status_label.setText("Stopping...")
+        self._stop_button.setEnabled(False)
         worker.stop()
 
     def _reset_buffers(self) -> None:
@@ -596,17 +596,17 @@ class MonitorWindow(QMainWindow):
         print(f'GUI: worker status -> {state}', flush=True)
         if state == "running":
             self._status_label.setText("Running")
-            self._start_button.setText("Stop")
-            self._start_button.setEnabled(True)
+            self._start_button.setEnabled(False)
+            self._stop_button.setEnabled(True)
         elif state == "stopped":
             self._status_label.setText("Stopped")
-            self._start_button.setText("Start")
             self._start_button.setEnabled(True)
+            self._stop_button.setEnabled(False)
 
     def _handle_worker_error(self, message: str) -> None:
         self._status_label.setText(f"Error: {message}")
-        self._start_button.setText("Start")
         self._start_button.setEnabled(True)
+        self._stop_button.setEnabled(False)
 
     def _handle_mode_info(self, description: str) -> None:
         self._mode_label.setText(f"Mode: {description}")
@@ -614,8 +614,8 @@ class MonitorWindow(QMainWindow):
     def _on_worker_finished(self) -> None:
         print('GUI: worker finished', flush=True)
         self._worker = None
-        self._start_button.setText("Start")
         self._start_button.setEnabled(True)
+        self._stop_button.setEnabled(False)
         self._status_label.setText("Stopped")
     def _on_psd_window_change(self, value: float) -> None:
         self._psd_window_sec = float(value)

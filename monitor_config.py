@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional, Tuple
 SAMPLE_RATE_HZ: float = 2048.0  # Fixed NI-DAQ sample rate (Hz)
 BLOCK_SIZE: int = 512            # Samples to read per acquisition block
 TIME_WINDOW_SECONDS: float = 2.0  # Duration shown in the time-domain plot
-DEFAULT_PSD_WINDOW_SECONDS: float = 1.0  # Welch window length in seconds
+DEFAULT_PSD_WINDOW_SECONDS: float = 0.25  # Welch window length in seconds
 PSD_WINDOW_BOUNDS: Tuple[float, float] = (0.1, 10.0)  # Allowed PSD window range in GUI
 PSD_OVERLAP: float = 0.5          # Fractional overlap for Welch PSD (0.0-0.95)
 
@@ -21,16 +21,7 @@ CHANNELS: List[Dict[str, Any]] = [
         "voltage_range": 5.0,             # +/- volts for fallback voltage mode
         "use_accel_channel": True,        # Try NI accel channel with IEPE support first
         "excitation_current_amps": 2.1e-3,
-        "terminal_config": "PSEUDO_DIFF",
-    },
-    {
-        "physical_channel": "Dev1/ai1",
-        "label": "Accel 1",
-        "sensitivity_mV_per_g": 100.0,
-        "voltage_range": 5.0,             # +/- volts for fallback voltage mode
-        "use_accel_channel": True,        # Try NI accel channel with IEPE support first
-        "excitation_current_amps": 2.1e-3,
-        "terminal_config": "PSEUDO_DIFF",
+        "terminal_config": "PSEUDO_DIFF"
     }
 ]
 
