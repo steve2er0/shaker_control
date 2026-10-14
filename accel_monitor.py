@@ -5,12 +5,13 @@ from __future__ import annotations
 
 import math
 import sys
+from threading import Event
 from dataclasses import dataclass
 from typing import Callable, Iterable, List, Optional, Sequence
 
 import numpy as np
 import pyqtgraph as pg
-from PySide6.QtCore import QThread, Signal, Qt
+from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import (
     QApplication,
     QDoubleSpinBox,
@@ -18,13 +19,13 @@ from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QPushButton,
-    QStatusBar,
     QVBoxLayout,
-    QWidget,
+    QWidget, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QSpinBox, QTableWidget, QTableWidgetItem,
 )
 from scipy.signal import welch
 
 import monitor_config as cfg
+from workspace_ui import configure_plot, COLORS
 
 try:  # Optional hardware support
     import nidaqmx
@@ -286,18 +287,13 @@ class NIDaqSession(BaseAcquisitionSession):
     def stop(self) -> None:
         self._stopping = True
         if self._task is not None:
-            try:
-                self._task.stop()
-            except Exception:
-                pass
+            self._task.stop()
 
     def close(self) -> None:
         if self._task is not None:
-            try:
-                self._task.close()
-            except Exception:
-                pass
+            task = self._task
             self._task = None
+            task.close()
 
 
 class SimulationSession(BaseAcquisitionSession):
@@ -319,6 +315,7 @@ class SimulationSession(BaseAcquisitionSession):
         self._base_freqs = np.linspace(12.0, 60.0, self._num_channels)
         self._t0 = 0.0
         self.description = "Simulation"
+        self.read_interval_seconds = self._block / self._fs
 
     def start(self) -> None:
         self._t0 = 0.0
@@ -345,13 +342,17 @@ class AcquisitionWorker(QThread):
         super().__init__()
         self._session_factory = session_factory
         self._session: Optional[BaseAcquisitionSession] = None
-        self._should_stop = False
+        self._stop_event = Event()
 
     def run(self) -> None:
         try:
+            if self._stop_event.is_set():
+                return
             print('AcquisitionWorker: creating session...', flush=True)
             self._session = self._session_factory()
             print('AcquisitionWorker: starting session...', flush=True)
+            if self._stop_event.is_set():
+                return
             self._session.start()
             description = getattr(self._session, 'description', '')
             if description:
@@ -360,11 +361,12 @@ class AcquisitionWorker(QThread):
             else:
                 print('AcquisitionWorker: session started', flush=True)
             self.status.emit('running')
-            while not self._should_stop:
+            while not self._stop_event.is_set():
                 block = self._session.read_block()
                 if block.size == 0:
                     continue
                 self.data_ready.emit(block)
+                self._stop_event.wait(getattr(self._session, 'read_interval_seconds', 0.0))
         except Exception as exc:  # pragma: no cover - runtime error channel
             print('AcquisitionWorker: exception during run:', exc, flush=True)
             import traceback as _tb  # local import to avoid global dependency if optional
@@ -372,138 +374,255 @@ class AcquisitionWorker(QThread):
             message = str(exc).strip()
             if not message:
                 message = exc.__class__.__name__
-            self.error.emit(message)
+            cancelled_read = (self._stop_event.is_set() and DaqError is not None
+                              and isinstance(exc, DaqError) and exc.error_code in (-200284, -200474))
+            if not cancelled_read:
+                self.error.emit(message)
         finally:
+            cleanup_errors = []
             if self._session is not None:
-                try:
-                    self._session.stop()
-                except Exception:
-                    pass
-                try:
-                    self._session.close()
-                except Exception:
-                    pass
+                for operation in (self._session.stop, self._session.close):
+                    try:
+                        operation()
+                    except Exception as exc:
+                        cleanup_errors.append(str(exc))
+            if cleanup_errors:
+                self.error.emit('Acquisition cleanup failed: ' + '; '.join(cleanup_errors))
             self.status.emit('stopped')
 
     def stop(self) -> None:
-        print('AcquisitionWorker: stop() called', flush=True)
-        self._should_stop = True
-        if self._session is not None:
-            try:
-                self._session.stop()
-                print('AcquisitionWorker: session.stop() issued', flush=True)
-            except Exception:
-                print('AcquisitionWorker: error during session.stop()', flush=True)
-                pass
+        # Hardware reads already have finite timeouts. Do not call the driver on
+        # the GUI thread; acquisition finalization owns stop/close.
+        self._stop_event.set()
+
+
+
+
+class MonitorSetupDialog(QDialog):
+    def __init__(self, window):
+        super().__init__(window)
+        self.setWindowTitle('Channels and acquisition')
+        self.resize(1000,480)
+        self.window = window
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+        self.fs_spin = QDoubleSpinBox()
+        self.fs_spin.setAccessibleName('Sample rate')
+        self.fs_spin.setRange(100,100000)
+        self.fs_spin.setValue(window._fs)
+        self.fs_spin.setSuffix(' Hz')
+        self.block_spin = QSpinBox()
+        self.block_spin.setAccessibleName('Acquisition block length')
+        self.block_spin.setRange(2,65536)
+        self.block_spin.setValue(window._block)
+        self.block_spin.setSuffix(' samples')
+        form.addRow('Sample rate',self.fs_spin)
+        form.addRow('Acquisition block',self.block_spin)
+        layout.addLayout(form)
+        self.table = QTableWidget(0,7)
+        self.table.setHorizontalHeaderLabels(['Physical input','Label','Sensitivity [mV/g]','IEPE [mA]','Voltage range [±V]','Input type','Terminal'])
+        for spec in window._channel_specs:
+            self.add_row(spec)
+        layout.addWidget(self.table,1)
+        row_actions = QHBoxLayout()
+        add, remove = QPushButton('Add channel'), QPushButton('Remove selected channel')
+        add.clicked.connect(lambda: self.add_row())
+        remove.clicked.connect(lambda: self.table.removeRow(self.table.currentRow()) if self.table.currentRow() >= 0 else None)
+        row_actions.addWidget(add)
+        row_actions.addWidget(remove)
+        row_actions.addStretch()
+        layout.addLayout(row_actions)
+        self.error_label = QLabel()
+        self.error_label.setWordWrap(True)
+        self.error_label.setStyleSheet('color: #bd493c;')
+        layout.addWidget(self.error_label)
+        buttons = QDialogButtonBox(QDialogButtonBox.Apply | QDialogButtonBox.Close)
+        buttons.button(QDialogButtonBox.Apply).clicked.connect(self.apply_setup)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        if window._worker is not None:
+            self.table.setEnabled(False)
+            self.fs_spin.setEnabled(False)
+            self.block_spin.setEnabled(False)
+            add.setEnabled(False)
+            remove.setEnabled(False)
+            buttons.button(QDialogButtonBox.Apply).setEnabled(False)
+            self.error_label.setText('Acquisition settings are locked for this run. Analysis window controls remain available.')
+
+    def add_row(self, spec=None):
+        row = self.table.rowCount()
+        self.table.insertRow(row)
+        values = [spec.physical_channel, spec.label, str(spec.sensitivity_mV_per_g), str(spec.excitation_current_amps*1000),str(spec.voltage_range)] if spec else ['', '', '', '0', '']
+        for column,value in enumerate(values):
+            self.table.setItem(row,column,QTableWidgetItem(value))
+        mode = QComboBox()
+        mode.addItems(['Acceleration','Voltage'])
+        mode.setCurrentIndex(0 if spec is None or spec.use_accel_channel else 1)
+        self.table.setCellWidget(row,5,mode)
+        terminal = QComboBox()
+        terminal.addItems(['DEFAULT','PSEUDO_DIFF','DIFF','RSE','NRSE'])
+        if spec:
+            terminal.setCurrentText(spec.terminal_config)
+        self.table.setCellWidget(row,6,terminal)
+        self.table.resizeColumnsToContents()
+
+    def apply_setup(self):
+        entries = []
+        try:
+            for row in range(self.table.rowCount()):
+                values = [self.table.item(row,column).text().strip() for column in range(5)]
+                sensitivity, current, voltage = map(float,values[2:])
+                if not values[0] or not values[1] or not all(math.isfinite(value) for value in (sensitivity,current,voltage)) or sensitivity <= 0 or current < 0 or voltage <= 0:
+                    raise ValueError('Each channel needs a physical input, label, positive sensitivity/range, and nonnegative IEPE current.')
+                entries.append({'physical_channel':values[0],'label':values[1], 'sensitivity_mV_per_g':sensitivity,
+                    'excitation_current_amps':current/1000, 'voltage_range':voltage,
+                    'use_accel_channel':self.table.cellWidget(row,5).currentIndex()==0,
+                    'terminal_config':self.table.cellWidget(row,6).currentText()})
+            if not entries or len({entry['physical_channel'] for entry in entries}) != len(entries) or len({entry['label'] for entry in entries}) != len(entries):
+                raise ValueError('Use at least one channel with unique physical inputs and labels.')
+            self.window.apply_acquisition_setup(load_channel_specs(entries),self.fs_spin.value(),self.block_spin.value())
+            self.accept()
+        except (ValueError,TypeError) as error:
+            self.error_label.setText(str(error))
 
 
 class MonitorWindow(QMainWindow):
-    def __init__(self) -> None:
+    def __init__(self):
         super().__init__()
-        self.setWindowTitle("Accelerometer Monitor")
-
-        pg.setConfigOptions(antialias=True)
+        self.setWindowTitle('Accelerometer Monitor')
+        self.resize(1100,800)
+        pg.setConfigOptions(antialias=True,foreground=QApplication.palette().text().color(),background=QApplication.palette().base().color())
         self._channel_specs = load_channel_specs(cfg.CHANNELS)
         self._fs = float(cfg.SAMPLE_RATE_HZ)
         self._block = int(cfg.BLOCK_SIZE)
         self._time_window_sec = float(cfg.TIME_WINDOW_SECONDS)
         self._psd_window_sec = float(cfg.DEFAULT_PSD_WINDOW_SECONDS)
-        self._psd_window_samples = max(int(self._psd_window_sec * self._fs), 32)
-
-        self._buffer_capacity = max(int(self._time_window_sec * self._fs), self._block)
-        self._buffer = np.zeros((len(self._channel_specs), self._buffer_capacity), dtype=np.float64)
-        self._buffer_fill = 0
-
-        self._worker: Optional[AcquisitionWorker] = None
-
-        central = QWidget(self)
+        self._worker = None
+        self._fault_message = ''
+        self._close_pending = False
+        self.current_run_settings = None
+        central = QWidget()
+        self.setCentralWidget(central)
         layout = QVBoxLayout(central)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(10)
-
-        self._time_plot = pg.PlotWidget()
-        self._time_plot.setLabel("left", "Acceleration", units="g")
-        self._time_plot.setLabel("bottom", "Time", units="s")
-        self._time_plot.showGrid(x=True, y=True, alpha=0.3)
-        self._time_plot.addLegend(offset=(10, 10))
+        layout.setContentsMargins(18,14,18,14)
+        title = QLabel('Accelerometer Monitor · acquisition only')
+        title.setStyleSheet('font-size: 20px; font-weight: 500;')
+        layout.addWidget(title)
+        controls = QHBoxLayout()
+        controls.addWidget(QLabel('Backend'))
+        self.backend_combo = QComboBox()
+        self.backend_combo.setAccessibleName('Acquisition backend')
+        self.backend_combo.addItem('Hardware',False)
+        self.backend_combo.addItem('Simulation',True)
+        self.backend_combo.setCurrentIndex(1 if cfg.SIMULATION_MODE else 0)
+        controls.addWidget(self.backend_combo)
+        self._mode_label = QLabel('Not initialized')
+        controls.addWidget(self._mode_label)
+        controls.addStretch()
+        self.setup_button = QPushButton('Channels / acquisition…')
+        self.setup_button.clicked.connect(self.show_setup)
+        controls.addWidget(self.setup_button)
+        self._status_label = QLabel('Ready')
+        controls.addWidget(self._status_label)
+        self._start_button, self._stop_button = QPushButton('Start acquisition'), QPushButton('Stop')
+        self._stop_button.setStyleSheet('QPushButton:enabled { color: #bd493c; }')
+        self._stop_button.setEnabled(False)
+        self._start_button.clicked.connect(self._start_acquisition)
+        self._stop_button.clicked.connect(self._stop_acquisition)
+        controls.addWidget(self._start_button)
+        controls.addWidget(self._stop_button)
+        layout.addLayout(controls)
+        self.fault_label = QLabel()
+        self.fault_label.setWordWrap(True)
+        self.fault_label.setStyleSheet('color: #bd493c;')
+        self.fault_label.hide()
+        layout.addWidget(self.fault_label)
+        self.acquisition_label = QLabel()
+        layout.addWidget(self.acquisition_label)
+        self._time_plot = pg.PlotWidget(title='Acquired acceleration')
+        self._time_plot.setLabel('left','Acceleration',units='g')
+        self._time_plot.setLabel('bottom','Time relative to latest sample',units='s')
+        self._psd_plot = pg.PlotWidget(title='Acceleration PSD')
+        self._psd_plot.setLabel('left','PSD',units='g²/Hz')
+        self._psd_plot.setLabel('bottom','Frequency',units='Hz')
+        self._psd_plot.setLogMode(y=True)
         if cfg.TIME_PLOT_Y_RANGE:
             self._time_plot.setYRange(*cfg.TIME_PLOT_Y_RANGE)
-        else:
-            self._time_plot.enableAutoRange(axis=pg.ViewBox.YAxis, enable=True)
-        self._time_plot.setXRange(-self._time_window_sec, 0.0)
-
-        self._psd_plot = pg.PlotWidget()
-        self._psd_plot.setLabel("left", "PSD", units="g^2/Hz")
-        self._psd_plot.setLabel("bottom", "Frequency", units="Hz")
-        self._psd_plot.showGrid(x=True, y=True, alpha=0.3)
-        self._psd_plot.addLegend(offset=(10, 10))
-        self._psd_plot.setLogMode(y=True)
         if cfg.PSD_Y_BOUNDS:
-            self._psd_plot.setYRange(*cfg.PSD_Y_BOUNDS)
-
-        layout.addWidget(self._time_plot)
-        layout.addWidget(self._psd_plot)
-
-        controls = QHBoxLayout()
-        controls.setSpacing(12)
-
-        self._start_button = QPushButton("Start")
-        self._start_button.clicked.connect(self._start_acquisition)
-        controls.addWidget(self._start_button, 0, Qt.AlignLeft)
-
-        self._stop_button = QPushButton("Stop")
-        self._stop_button.setEnabled(False)
-        self._stop_button.clicked.connect(self._stop_acquisition)
-        controls.addWidget(self._stop_button, 0, Qt.AlignLeft)
-
-        controls.addWidget(QLabel("PSD window (s):"))
+            low, high = cfg.PSD_Y_BOUNDS
+            if 0 < low < high:
+                self._psd_plot.setYRange(math.log10(low),math.log10(high))
+        for plot in (self._time_plot,self._psd_plot):
+            configure_plot(plot)
+            plot.addLegend(brush=pg.mkBrush(QApplication.palette().base().color()))
+            layout.addWidget(plot,1)
+        analysis = QHBoxLayout()
+        analysis.addWidget(QLabel('PSD segment duration'))
         self._psd_spin = QDoubleSpinBox()
+        self._psd_spin.setAccessibleName('PSD segment duration')
         self._psd_spin.setDecimals(3)
         self._psd_spin.setRange(*cfg.PSD_WINDOW_BOUNDS)
-        self._psd_spin.setSingleStep(0.1)
+        self._psd_spin.setSuffix(' s')
         self._psd_spin.setValue(self._psd_window_sec)
         self._psd_spin.valueChanged.connect(self._on_psd_window_change)
-        controls.addWidget(self._psd_spin, 0, Qt.AlignLeft)
-        controls.addStretch(1)
+        analysis.addWidget(self._psd_spin)
+        self.psd_effective_label = QLabel('Waiting for samples')
+        analysis.addWidget(self.psd_effective_label)
+        analysis.addStretch()
+        layout.addLayout(analysis)
+        self._rebuild_channels()
 
-        layout.addLayout(controls)
+    def _rebuild_channels(self):
+        self._psd_window_samples = max(int(self._psd_window_sec*self._fs),32)
+        self._buffer_capacity = max(int(max(self._time_window_sec,cfg.PSD_WINDOW_BOUNDS[1])*self._fs),self._block)
+        self._buffer = np.zeros((len(self._channel_specs),self._buffer_capacity))
+        self._buffer_fill = 0
+        for plot in (self._time_plot,self._psd_plot):
+            plot.clear()
+            plot.getPlotItem().legend.clear()
+        self._time_curves, self._psd_curves = [], []
+        for index,spec in enumerate(self._channel_specs):
+            color = COLORS[index % len(COLORS)]
+            curve = self._time_plot.plot(pen=pg.mkPen(color,width=1.5),name=spec.label)
+            curve.setDownsampling(auto=True,method='peak')
+            curve.setClipToView(True)
+            self._time_curves.append(curve)
+            self._psd_curves.append(self._psd_plot.plot(pen=pg.mkPen(color,width=1.5),name=spec.label))
+        self._time_plot.setXRange(-self._time_window_sec,0,padding=0)
+        self.acquisition_label.setText(f'{self._fs:g} Hz · {self._block} samples/block · {len(self._channel_specs)} channel(s) · time view {self._time_window_sec:g} s')
+        self.psd_effective_label.setText('Waiting for samples')
 
-        self.setCentralWidget(central)
-        status = QStatusBar(self)
-        self._status_label = QLabel("Idle")
-        self._mode_label = QLabel("Mode: -")
-        status.addWidget(self._status_label)
-        status.addPermanentWidget(self._mode_label)
-        self.setStatusBar(status)
+    def show_setup(self):
+        dialog = MonitorSetupDialog(self)
+        dialog.exec()
 
-        palette = cfg.COLOR_PALETTE
-        self._time_curves = []
-        self._psd_curves = []
-        for idx, spec in enumerate(self._channel_specs):
-            color = palette[idx % len(palette)]
-            pen = pg.mkPen(color=color, width=1.4)
-            self._time_curves.append(self._time_plot.plot(pen=pen, name=spec.label))
-            self._psd_curves.append(self._psd_plot.plot(pen=pen, name=spec.label))
+    def apply_acquisition_setup(self, specs, fs, block):
+        if self._worker is not None:
+            raise ValueError('Stop acquisition before changing channels or sample rate.')
+        if not math.isfinite(fs) or fs <= 0 or block < 2:
+            raise ValueError('Use a positive sample rate and at least two samples per block.')
+        self._channel_specs, self._fs, self._block = list(specs),float(fs),int(block)
+        self._rebuild_channels()
 
-    def _start_acquisition(self) -> None:
-        if self._worker and self._worker.isRunning():
+    def _start_acquisition(self):
+        if self._worker is not None:
             return
+        self._fault_message = ''
+        self.fault_label.hide()
         self._reset_buffers()
         self._start_button.setEnabled(False)
-        self._stop_button.setEnabled(False)
-        self._status_label.setText("Starting...")
-
-        def factory() -> BaseAcquisitionSession:
-            if cfg.SIMULATION_MODE or not NIDAQ_AVAILABLE:
-                return SimulationSession(
-                    channels=self._channel_specs,
-                    fs=self._fs,
-                    block_samples=self._block,
-                    noise_level=cfg.SIM_NOISE_LEVEL,
-                    seed=cfg.SIM_SEED,
-                )
-            return NIDaqSession(self._channel_specs, self._fs, self._block)
-
+        self._stop_button.setEnabled(True)
+        self.backend_combo.setEnabled(False)
+        self._status_label.setText('Starting…')
+        simulation = bool(self.backend_combo.currentData())
+        channels, fs, block = tuple(self._channel_specs),self._fs,self._block
+        self._mode_label.setText(('Simulation' if simulation else 'Hardware') + ' requested · not initialized')
+        self.current_run_settings = {'backend':'Simulation' if simulation else 'Hardware','fs':fs,'block_samples':block,
+            'channels':[spec.__dict__.copy() for spec in channels]}
+        def factory():
+            if simulation:
+                return SimulationSession(channels,fs,block,cfg.SIM_NOISE_LEVEL,cfg.SIM_SEED)
+            return NIDaqSession(channels,fs,block)
         self._worker = AcquisitionWorker(factory)
         self._worker.data_ready.connect(self._handle_block)
         self._worker.status.connect(self._handle_worker_status)
@@ -512,120 +631,118 @@ class MonitorWindow(QMainWindow):
         self._worker.finished.connect(self._on_worker_finished)
         self._worker.start()
 
-    def _stop_acquisition(self) -> None:
-        worker = self._worker
-        if not worker:
+    def _stop_acquisition(self):
+        if self._worker is None:
             return
-        self._status_label.setText("Stopping...")
+        self._status_label.setText('Stopping…')
         self._stop_button.setEnabled(False)
-        worker.stop()
+        self._worker.stop()
 
-    def _reset_buffers(self) -> None:
-        self._buffer.fill(0.0)
+    def _reset_buffers(self):
+        self._buffer.fill(0)
         self._buffer_fill = 0
-        for curve in self._time_curves:
+        for curve in self._time_curves + self._psd_curves:
             curve.clear()
-        for curve in self._psd_curves:
-            curve.clear()
+        self.psd_effective_label.setText('Waiting for samples')
 
-    def _handle_block(self, block: np.ndarray) -> None:
-        block = np.asarray(block, dtype=np.float64)
-        if block.ndim == 1:
-            block = block[np.newaxis, :]
+    def _handle_block(self, block):
+        block = np.atleast_2d(np.asarray(block))
+        if block.shape[0] != len(self._channel_specs) or not np.all(np.isfinite(block)):
+            self._handle_worker_error('Acquisition returned invalid channel data')
+            if self._worker:
+                self._worker.stop()
+            return
         self._append_to_buffer(block)
         self._update_time_plot()
         self._update_psd_plot()
 
-    def _append_to_buffer(self, block: np.ndarray) -> None:
-        num_new = block.shape[1]
-        cap = self._buffer.shape[1]
-        if num_new >= cap:
-            self._buffer[:, :] = block[:, -cap:]
-            self._buffer_fill = cap
-            return
-        if self._buffer_fill < cap:
-            available = cap - self._buffer_fill
-            take = min(available, num_new)
-            if take > 0:
-                self._buffer[:, self._buffer_fill : self._buffer_fill + take] = block[:, :take]
-                self._buffer_fill += take
-            if take == num_new:
-                return
-            remaining = num_new - take
-            self._buffer[:, :-remaining] = self._buffer[:, remaining:]
-            self._buffer[:, -remaining:] = block[:, take:]
-            self._buffer_fill = cap
-            return
-        self._buffer[:, :-num_new] = self._buffer[:, num_new:]
-        self._buffer[:, -num_new:] = block[:, :num_new]
+    def _append_to_buffer(self, block):
+        count = block.shape[1]
+        capacity = self._buffer_capacity
+        if count >= capacity:
+            self._buffer[:] = block[:, -capacity:]
+            self._buffer_fill = capacity
+        elif self._buffer_fill + count <= capacity:
+            self._buffer[:,self._buffer_fill:self._buffer_fill+count] = block
+            self._buffer_fill += count
+        else:
+            existing = self._buffer[:,:self._buffer_fill]
+            combined = np.concatenate((existing,block),axis=1)[:, -capacity:]
+            self._buffer[:,:combined.shape[1]] = combined
+            self._buffer_fill = combined.shape[1]
 
-    def _buffer_view(self) -> Optional[np.ndarray]:
-        if self._buffer_fill == 0:
-            return None
-        if self._buffer_fill < self._buffer.shape[1]:
-            return self._buffer[:, : self._buffer_fill]
-        return self._buffer
+    def _buffer_view(self):
+        return self._buffer[:,:self._buffer_fill] if self._buffer_fill else None
 
-    def _update_time_plot(self) -> None:
+    def _update_time_plot(self):
         data = self._buffer_view()
         if data is None:
             return
-        samples = data.shape[1]
-        time_axis = np.linspace(-samples / self._fs, 0, samples, endpoint=False)
-        for curve, series in zip(self._time_curves, data):
-            curve.setData(time_axis, series)
+        data = data[:, -max(1,int(self._time_window_sec*self._fs)):]
+        times = (np.arange(data.shape[1])-data.shape[1]+1)/self._fs
+        for curve,series in zip(self._time_curves,data):
+            curve.setData(times,series)
 
-    def _update_psd_plot(self) -> None:
+    def _update_psd_plot(self):
         data = self._buffer_view()
         if data is None:
             return
-        psd_samples = min(data.shape[1], self._psd_window_samples)
-        if psd_samples < 32:
+        samples = min(data.shape[1],self._psd_window_samples)
+        if samples < 32:
+            self.psd_effective_label.setText('Collecting samples…')
             return
-        segment = data[:, -psd_samples:]
-        nperseg = max(min(psd_samples, int(self._psd_window_sec * self._fs)), 32)
-        noverlap = int(nperseg * min(max(cfg.PSD_OVERLAP, 0.0), 0.95))
-        freqs = None
-        for curve, series in zip(self._psd_curves, segment):
-            f, pxx = welch(series, fs=self._fs, nperseg=nperseg, noverlap=noverlap)
-            if freqs is None:
-                freqs = f
-            curve.setData(freqs, pxx)
+        overlap = int(samples*min(max(cfg.PSD_OVERLAP,0),.95))
+        for curve,series in zip(self._psd_curves,data[:,-samples:]):
+            f,psd = welch(series,fs=self._fs,nperseg=samples,noverlap=overlap)
+            curve.setData(f,psd)
+        effective = samples/self._fs
+        self.psd_effective_label.setText(f'Effective {effective:.3g} s · {self._fs/samples:.3g} Hz bins' + (' · collecting full window' if samples < self._psd_window_samples else ''))
 
-    def _handle_worker_status(self, state: str) -> None:
-        print(f'GUI: worker status -> {state}', flush=True)
-        if state == "running":
-            self._status_label.setText("Running")
-            self._start_button.setEnabled(False)
-            self._stop_button.setEnabled(True)
-        elif state == "stopped":
-            self._status_label.setText("Stopped")
-            self._start_button.setEnabled(True)
-            self._stop_button.setEnabled(False)
+    def _handle_worker_status(self, state):
+        if self._fault_message:
+            self._status_label.setText('Fault')
+        elif state == 'running':
+            if self._status_label.text() != 'Stopping…':
+                self._status_label.setText('Running')
+        else:
+            self._status_label.setText('Stopped')
+        self._stop_button.setEnabled(state == 'running' and not self._fault_message and self._status_label.text() != 'Stopping…')
 
-    def _handle_worker_error(self, message: str) -> None:
-        self._status_label.setText(f"Error: {message}")
-        self._start_button.setEnabled(True)
+    def _handle_worker_error(self, message):
+        self._fault_message = message
+        self.fault_label.setText(message)
+        self.fault_label.show()
+        self._status_label.setText('Fault')
         self._stop_button.setEnabled(False)
 
-    def _handle_mode_info(self, description: str) -> None:
-        self._mode_label.setText(f"Mode: {description}")
+    def _handle_mode_info(self, description):
+        self._mode_label.setText(description)
 
-    def _on_worker_finished(self) -> None:
-        print('GUI: worker finished', flush=True)
+    def _on_worker_finished(self):
+        worker = self._worker
+        if worker:
+            worker.wait()
+            worker.deleteLater()
         self._worker = None
         self._start_button.setEnabled(True)
         self._stop_button.setEnabled(False)
-        self._status_label.setText("Stopped")
-    def _on_psd_window_change(self, value: float) -> None:
-        self._psd_window_sec = float(value)
-        self._psd_window_samples = max(int(self._psd_window_sec * self._fs), 32)
+        self.backend_combo.setEnabled(True)
+        self._status_label.setText('Fault' if self._fault_message else 'Stopped')
+        if self._close_pending:
+            self.close()
 
-    def closeEvent(self, event) -> None:  # type: ignore[override]
-        if self._worker:
-            self._worker.stop()
-            self._worker.wait(1500)
-        super().closeEvent(event)
+    def _on_psd_window_change(self, value):
+        self._psd_window_sec = float(value)
+        self._psd_window_samples = max(32,int(self._fs*value))
+        self._update_psd_plot()
+
+    def closeEvent(self,event):
+        if self._worker is not None:
+            self._close_pending = True
+            self._stop_acquisition()
+            event.ignore()
+        else:
+            event.accept()
 
 def main() -> None:
     app = QApplication(sys.argv)

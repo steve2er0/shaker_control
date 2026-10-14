@@ -11,7 +11,7 @@ ACCEL_MV_PER_G = 100.0      # Accelerometer sensitivity [mV/g]
 ACCEL_EXCITATION_AMPS = 2.1e-3  # IEPE excitation current [A], set 0 for external
 AO_VOLT_LIMIT = 1.8         # Absolute max AO voltage magnitude [V]
 
-# Input channel labels for visualization (order matches DAQ wiring)
+# Controller hardware uses the first label; simulation uses all labels.
 INPUT_CHANNEL_LABELS = [
     "Control Accel",
     "Response 1",
@@ -27,21 +27,19 @@ TEST_MODE = "random"
 FS = 51200.0                # Sample rate [Hz]
 BUF_SECONDS = 4           # Buffer size for AO/AI streaming
 BLOCK_SECONDS = 1         # Processing block duration
-WELCH_NPERSEG = 4096        # Welch segment length (power of 2)
+WELCH_NPERSEG = 4096        # Welch segment length; must fit one processing block
 
 # ============= TARGET PSD PROFILE =============
 # List of (frequency [Hz], PSD level [g^2/Hz]) pairs
 TARGET_PSD_POINTS = [
-    (100.0, 0.001),     # 2.5e-3 g^2/Hz
-    (300.0, 0.004),       # 1e-2 g^2/Hz  
-    (350.0, 0.004),      # 1e-2 g^2/Hz
-    (500.0, 0.001)    # 2.5e-3 g^2/Hz
+    (100.0, 0.001),
+    (300.0, 0.004),
+    (350.0, 0.004),
+    (500.0, 0.001),
 ]
 
-# === Add
-
 # ============= CONTROL PARAMETERS =============
-INITIAL_LEVEL_FRACTION = 0.1    # Start at 100% of target
+INITIAL_LEVEL_FRACTION = 0.1    # Start at 10% acceleration amplitude (1% target PSD)
 MAX_LEVEL_FRACTION_RATE = 2   # Max change in level per second
 KP = 0.9                        # Proportional gain
 KI = .06                        # Integral gain
@@ -73,9 +71,10 @@ SINE_SWEEP_MAX_LEVEL_RATE = 0.5 # Max change in level fraction per second
 SINE_SWEEP_INITIAL_SETTLE = 3.0 # Extra dwell at first step [s]
 SINE_SWEEP_POINTS_PER_OCTAVE = 12
 SINE_SWEEP_STEP_DWELL = 0.5    # Dwell time per frequency step [s]
-SINE_SWEEP_DEFAULT_VPK = 0.4   # Default drive amplitude (peak volts) when no table provided
+SINE_SWEEP_DEFAULT_VPK = 0.4   # V peak per 1 g peak when no table is provided
 SINE_SWEEP_DRIVE_SCALE = 1.0   # Global scale factor applied to the drive table/default
-SINE_SWEEP_DRIVE_TABLE = [     # Optional list of (frequency [Hz], peak volts)
+SINE_SWEEP_CALIBRATION_SOURCE = ""  # Record equipment/load/date or simulation provenance
+SINE_SWEEP_DRIVE_TABLE = [     # Optional (frequency [Hz], V peak per 1 g peak)
     (20.000000, 0.781627),
     (40.000000, 0.257444),
     (80.000000, 0.115932),

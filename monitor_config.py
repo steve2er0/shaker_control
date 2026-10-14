@@ -3,7 +3,7 @@
 from typing import Any, Dict, List, Optional, Tuple
 
 # ---------- Acquisition Parameters ----------
-SAMPLE_RATE_HZ: float = 2048.0  # Fixed NI-DAQ sample rate (Hz)
+SAMPLE_RATE_HZ: float = 2048.0  # Initial acquisition sample rate (Hz); editable while stopped
 BLOCK_SIZE: int = 512            # Samples to read per acquisition block
 TIME_WINDOW_SECONDS: float = 2.0  # Duration shown in the time-domain plot
 DEFAULT_PSD_WINDOW_SECONDS: float = 0.25  # Welch window length in seconds
@@ -31,19 +31,8 @@ SIM_NOISE_LEVEL: float = 0.05  # g RMS noise when running simulation
 SIM_SEED: Optional[int] = None  # Optional random seed for repeatable traces
 
 # ---------- Plot Appearance ----------
+# Optional fixed bounds; channel colors follow the shared controller palette.
 TIME_PLOT_Y_RANGE: Optional[Tuple[float, float]] = None  # (min, max) for fixed axis or None for auto
 PSD_Y_BOUNDS: Optional[Tuple[float, float]] = None       # Optional fixed PSD bounds (linear units)
-COLOR_PALETTE: List[str] = [
-    "#1f77b4",  # blue
-    "#ff7f0e",  # orange
-    "#2ca02c",  # green
-    "#d62728",  # red
-    "#9467bd",  # purple
-    "#8c564b",  # brown
-]
-
-"""
-Modify CHANNELS and sensitivities to match your hardware wiring. The application reads each
-channel continuously at 51.2 kHz, converts voltages to g using the configured sensitivities,
-shows the latest time-domain window, and computes PSDs using an adjustable Welch window.
-"""
+# Modify CHANNELS or use Channels / acquisition to match hardware wiring.
+# The PSD buffer retains the maximum selectable duration independently of the time view.

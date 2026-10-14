@@ -1,0 +1,167 @@
+{
+  "commit": "3aa27a97079e829889849822bec03df82a6fb415",
+  "rendering": "Qt offscreen native widgets; simulation only",
+  "screenshots": [
+    "docs/design-audit/screenshots/configuration-top.png",
+    "docs/design-audit/screenshots/configuration-bottom.png",
+    "docs/design-audit/screenshots/random-controller.png",
+    "docs/design-audit/screenshots/random-data.png",
+    "docs/design-audit/screenshots/sine_sweep-controller.png",
+    "docs/design-audit/screenshots/sine_sweep-data.png",
+    "docs/design-audit/screenshots/initialization-failure.png",
+    "docs/design-audit/screenshots/accelerometer-monitor.png"
+  ],
+  "probes": {
+    "configuration_initial_view": {
+      "window_size": [
+        1200,
+        800
+      ],
+      "viewport_height": 729,
+      "apply_button_y": 1172,
+      "apply_visible_without_scrolling": false,
+      "scroll_max": 477
+    },
+    "sample_rate_apply": {
+      "configured_fs": 8000.0,
+      "viewer_fs_after_apply": 51200.0,
+      "original_viewer_fs": 51200.0
+    },
+    "accepted_level_values": {
+      "random_initial": 5.0,
+      "sine_initial": 2.0,
+      "random_controller_upper_bound": 2.0,
+      "sine_worker_initial_upper_bound": 1.0
+    },
+    "simulation_channels_after_toggle": {
+      "configured_labels": [
+        "Control Accel"
+      ],
+      "configured_channel_count": 1,
+      "viewer_channel_count": 1
+    },
+    "random_screens": {
+      "simulation_packets": 8,
+      "controller_status_after_worker_returns": "Status: Running"
+    },
+    "sine_sweep_screens": {
+      "simulation_packets": 8,
+      "controller_status_after_worker_returns": "Status: Running | f=20.0 Hz | gpk=5.088 (target 1.623)"
+    },
+    "initialization_failure": {
+      "accepted_fs": 1000.0,
+      "worker_running": false,
+      "status_signal_gui_receivers": 0,
+      "ui_status": "Status: Running",
+      "ui_start_enabled": false,
+      "ui_stop_enabled": true,
+      "thread_still_running": true,
+      "ui_status_after_stop_click": "Status: Running"
+    },
+    "monitor_psd_window": {
+      "requested_seconds": 10.0,
+      "buffer_capacity_seconds": 2.0,
+      "available_psd_seconds": 2.0
+    },
+    "monitor_fault_visibility": {
+      "error_text_initial": "Error: Synthetic acquisition failure for audit",
+      "text_after_stopped_and_finished": "Stopped"
+    },
+    "mode_target_clearing": {
+      "target_curve_points_after_sine_packet_with_no_target": 3
+    },
+    "equalizer_refresh": {
+      "legend_items_first_update": 3,
+      "bar_present_after_metrics_only_update": false,
+      "legend_items_next_update": 4
+    },
+    "mode_specific_settings": {
+      "sine_selected": true,
+      "random_kp_still_enabled": true,
+      "eq_band_count_still_enabled": true
+    }
+  },
+  "findings": [
+    {
+      "id": "F01",
+      "priority": "first",
+      "finding": "Worker status and GUI run state are disconnected; an initialization failure leaves Running and a Stop action that does not recover the UI.",
+      "source": "app.py:1959-2000",
+      "recommendation": "Use one authoritative run lifecycle for start, stop, completion, fault, and backend status."
+    },
+    {
+      "id": "F02",
+      "priority": "first",
+      "finding": "Apply mutates shared settings while the controller and viewer retain some old values; the viewer sample rate stays at its construction value.",
+      "source": "app.py:601-643; app.py:949-980; app.py:1072-1073",
+      "recommendation": "Separate editable draft from the validated configuration captured for a run; lock acquisition and mode changes during a run."
+    },
+    {
+      "id": "F03",
+      "priority": "first",
+      "finding": "Individual widget ranges permit combinations that fail at initialization or disagree with effective control bounds.",
+      "source": "app.py:364-509; app.py:1691-1731; rv_controller.py:269-294",
+      "recommendation": "Validate Nyquist, block/PSD sizing, buffer sizing, level bounds, and units as a complete configuration; show errors beside fields before enabling Start."
+    },
+    {
+      "id": "F04",
+      "priority": "next",
+      "finding": "Apply and backend selection are below the fold; seven groups include inactive settings and the run controls exist only on the Controller tab.",
+      "source": "app.py:352-549; app.py:672-693",
+      "recommendation": "Keep backend, state, target summary, Start/Stop, and change status in the main window; reveal setup and advanced parameters when needed."
+    },
+    {
+      "id": "F05",
+      "priority": "next",
+      "finding": "Sine displays reuse the random PSD/EQ layout, retain the previous target, and keep histories across runs; EQ refresh accumulates legend entries.",
+      "source": "app.py:788-944",
+      "recommendation": "Reset each run and mode explicitly; show the mode-specific primary plot and use separate unchanged/clear/update semantics for plot updates."
+    },
+    {
+      "id": "F06",
+      "priority": "next",
+      "finding": "The metrics graph mixes g, dimensionless level, percent saturation, and g/V on one axis; labels and colors differ between the controller and data views.",
+      "source": "app.py:716-743; app.py:1004-1058",
+      "recommendation": "Use unit-specific numeric readouts and separate selected trends in elapsed seconds; keep measured/target colors and line styles consistent."
+    },
+    {
+      "id": "F07",
+      "priority": "next",
+      "finding": "The monitor accepts a 10-second PSD window with a 2-second buffer and overwrites fault text with Stopped.",
+      "source": "accel_monitor.py:406-417; accel_monitor.py:578-592; accel_monitor.py:606-620",
+      "recommendation": "Match retained samples to the requested analysis window or report the effective window; retain faults until dismissed or a new run starts."
+    },
+    {
+      "id": "F08",
+      "priority": "later",
+      "finding": "Targets, channels, calibration provenance, and log output paths are largely file-based; there is no visible review of the exact setup used for a completed run.",
+      "source": "config.py; monitor_config.py; app.py:67-247; app.py:601-643",
+      "recommendation": "Add editable target/channel setup, calibration source, effective settings, and a results view with log locations and summaries."
+    }
+  ],
+  "limits": [
+    "Native Qt widgets were captured with the offscreen platform; macOS chrome, keyboard/screen-reader usability, and physical DAQ behavior were not validated.",
+    "Simulation packets were supplied through the existing worker and UI methods; this is a workflow audit, not a sustained performance or hardware tracking test.",
+    "No production application code was changed; artifacts are local and uncommitted."
+  ],
+  "proposal_checks": {
+    "browser": "Chrome, localhost preview through the visualization renderer",
+    "verified_interactions": [
+      "Invalid sample rate blocks Start and shows field feedback",
+      "Apply restores Ready",
+      "Start locks mode and setup",
+      "Stop remains visible on Results",
+      "Stop restores editable setup",
+      "Sine mode uses g-peak and its own plot",
+      "Monitor mode hides level and recording controls",
+      "Guided setup validation, start, stop, and review"
+    ],
+    "verified_viewport_widths": [
+      320,
+      1024
+    ],
+    "horizontal_overflow": false,
+    "browser_console_errors": [],
+    "limits": "Illustrative prototype only; no hardware, export, keyboard/screen-reader, or full end-to-end native GUI validation."
+  }
+}

@@ -173,23 +173,22 @@ class LogSweepStepper:
         if self._completed and not self.repeat:
             return False
 
+        if math.isclose(self._current, self.end_freq, rel_tol=1e-12):
+            self._completed = True
+            if self.repeat:
+                self._current = self.start_freq
+                return True
+            return False
+
         next_freq = self._current * self._ratio
         if self._increasing:
             if next_freq > self.end_freq:
-                if self.repeat:
-                    self._current = self.start_freq
-                    self._completed = True
-                    return True
-                self._completed = True
-                return False
+                self._current = self.end_freq
+                return True
         else:
             if next_freq < self.end_freq:
-                if self.repeat:
-                    self._current = self.start_freq
-                    self._completed = True
-                    return True
-                self._completed = True
-                return False
+                self._current = self.end_freq
+                return True
 
         self._current = next_freq
         return True

@@ -1,0 +1,320 @@
+<div id="shaker-flow-proposal">
+  <style>
+    #shaker-flow-proposal { color-scheme: light dark; }
+    #shaker-flow-proposal .sc-stage { min-height: 640px; }
+    #shaker-flow-proposal .sc-window {
+      --sc-bg: light-dark(#f8fafb, #171b20);
+      --sc-panel: light-dark(#ffffff, #20262d);
+      --sc-text: light-dark(#17222e, #edf2f7);
+      --sc-muted: light-dark(#526274, #acbac9);
+      --sc-line: light-dark(#d6dfe7, #3b4855);
+      --sc-accent: light-dark(#205f9c, #7ab5e6);
+      --sc-button: light-dark(#205f9c, #8dc5ef);
+      --sc-button-text: light-dark(#ffffff, #122331);
+      --sc-alert: light-dark(#fff0ec, #482a26);
+      --sc-danger: light-dark(#a12d21, #ffb4a8);
+      min-height: 600px; background: var(--sc-bg); color: var(--sc-text);
+      border: 1px solid var(--sc-line); border-radius: 10px;
+      font: 14px/1.45 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }
+    #shaker-flow-proposal .sc-window * { box-sizing: border-box; }
+    #shaker-flow-proposal .sc-chrome { padding: 16px 18px 12px; padding-right: 100px; border-bottom: 1px solid var(--sc-line); }
+    #shaker-flow-proposal .sc-identity { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+    #shaker-flow-proposal .sc-name { font-size: 18px; font-weight: 600; }
+    #shaker-flow-proposal .sc-caption { color: var(--sc-muted); font-size: 12px; }
+    #shaker-flow-proposal .sc-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+    #shaker-flow-proposal .sc-toolbar label { display: flex; align-items: center; gap: 6px; }
+    #shaker-flow-proposal .sc-state { font-weight: 600; margin-left: auto; }
+    #shaker-flow-proposal .sc-window button, #shaker-flow-proposal .sc-window select, #shaker-flow-proposal .sc-window input {
+      font: inherit; color: var(--sc-text); background: var(--sc-panel); border: 1px solid var(--sc-line);
+      border-radius: 5px; padding: 6px 10px; min-height: 34px; max-width: 100%;
+    }
+    #shaker-flow-proposal .sc-window button { cursor: default; white-space: normal; }
+    #shaker-flow-proposal .sc-window button:disabled, #shaker-flow-proposal .sc-window input:disabled, #shaker-flow-proposal .sc-window select:disabled { opacity: .55; }
+    #shaker-flow-proposal .sc-window .sc-primary { background: var(--sc-button); color: var(--sc-button-text); border-color: transparent; }
+    #shaker-flow-proposal .sc-window .sc-stop { border-color: var(--sc-danger); color: var(--sc-danger); }
+    #shaker-flow-proposal .sc-summary { display: flex; flex-wrap: wrap; gap: 8px 22px; padding: 10px 18px; color: var(--sc-muted); border-bottom: 1px solid var(--sc-line); font-size: 12px; }
+    #shaker-flow-proposal .sc-nav { display: flex; gap: 6px; padding: 12px 18px 0; flex-wrap: wrap; }
+    #shaker-flow-proposal .sc-nav button { border-color: transparent; background: transparent; }
+    #shaker-flow-proposal .sc-nav button[aria-pressed="true"] { background: var(--sc-panel); border-color: var(--sc-line); font-weight: 600; }
+    #shaker-flow-proposal .sc-main { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; padding: 16px 18px 20px; }
+    #shaker-flow-proposal .sc-main.sc-with-setup { grid-template-columns: minmax(0, 1fr) 270px; }
+    #shaker-flow-proposal .sc-main.sc-guided-setup { grid-template-columns: minmax(0, 1fr) minmax(220px, .7fr); }
+    #shaker-flow-proposal .sc-main > * { min-width: 0; }
+    #shaker-flow-proposal .sc-readouts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0 0 18px; }
+    #shaker-flow-proposal .sc-readouts dt { color: var(--sc-muted); font-size: 12px; }
+    #shaker-flow-proposal .sc-readouts dd { margin: 3px 0 0; font-size: 20px; font-weight: 500; font-variant-numeric: tabular-nums; }
+    #shaker-flow-proposal .sc-heading { margin: 0 0 12px; font-size: 15px; font-weight: 600; }
+    #shaker-flow-proposal .sc-plot { width: 100%; min-height: 300px; background: var(--sc-panel); border-radius: 5px; }
+    #shaker-flow-proposal .sc-legend { display: flex; gap: 18px; flex-wrap: wrap; margin: 8px 0; color: var(--sc-muted); font-size: 12px; }
+    #shaker-flow-proposal .sc-measured-key { border-top: 2px solid var(--sc-accent); width: 18px; display: inline-block; margin-right: 6px; vertical-align: middle; }
+    #shaker-flow-proposal .sc-target-key { border-top: 2px dashed var(--sc-muted); width: 18px; display: inline-block; margin-right: 6px; vertical-align: middle; }
+    #shaker-flow-proposal .sc-setup { border-left: 1px solid var(--sc-line); padding-left: 18px; }
+    #shaker-flow-proposal .sc-guided-setup .sc-setup { border-left: none; padding-left: 0; }
+    #shaker-flow-proposal .sc-field { display: grid; gap: 5px; margin-bottom: 12px; }
+    #shaker-flow-proposal .sc-field > span { color: var(--sc-muted); font-size: 12px; }
+    #shaker-flow-proposal .sc-field input, #shaker-flow-proposal .sc-field select { width: 100%; }
+    #shaker-flow-proposal .sc-setup-note { color: var(--sc-muted); font-size: 12px; margin: 8px 0 14px; }
+    #shaker-flow-proposal .sc-window details { border-top: 1px solid var(--sc-line); padding-top: 12px; margin-top: 12px; }
+    #shaker-flow-proposal .sc-window summary { color: var(--sc-muted); }
+    #shaker-flow-proposal .sc-review { background: var(--sc-panel); padding: 18px; border-radius: 6px; }
+    #shaker-flow-proposal .sc-review dl { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    #shaker-flow-proposal .sc-review dt { color: var(--sc-muted); font-size: 12px; }
+    #shaker-flow-proposal .sc-review dd { margin: 4px 0 0; }
+    #shaker-flow-proposal .sc-alert { margin: 10px 18px 0; padding: 10px 12px; background: var(--sc-alert); color: var(--sc-danger); display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    #shaker-flow-proposal .sc-alert button { margin-left: auto; }
+    #shaker-flow-proposal .sc-error { color: var(--sc-danger); font-size: 12px; margin-bottom: 12px; }
+    #shaker-flow-proposal .sc-status-note { color: var(--sc-muted); font-size: 12px; margin-top: 10px; }
+    #shaker-flow-proposal .sc-step { color: var(--sc-muted); font-size: 12px; }
+    #shaker-flow-proposal .sc-step strong { color: var(--sc-text); font-weight: 600; }
+    #shaker-flow-proposal .sc-window [hidden] { display: none !important; }
+    @media (max-width: 700px) {
+      #shaker-flow-proposal .sc-main.sc-with-setup, #shaker-flow-proposal .sc-main.sc-guided-setup { grid-template-columns: 1fr; }
+      #shaker-flow-proposal .sc-setup { border-left: none; padding-left: 0; border-top: 1px solid var(--sc-line); padding-top: 16px; }
+      #shaker-flow-proposal .sc-stage { min-height: 960px; }
+      #shaker-flow-proposal .sc-chrome { padding-right: 18px; }
+      #shaker-flow-proposal .sc-identity { padding-right: 80px; }
+      #shaker-flow-proposal .sc-state { margin-left: 0; }
+    }
+    @media (max-width: 400px) {
+      #shaker-flow-proposal .sc-readouts { grid-template-columns: 1fr; gap: 8px; }
+      #shaker-flow-proposal .sc-readouts > div { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+      #shaker-flow-proposal .sc-review dl { grid-template-columns: 1fr; }
+      #shaker-flow-proposal .sc-toolbar label { flex-wrap: wrap; }
+    }
+  </style>
+  <div class="viz-carousel" aria-label="Shaker workflow proposals">
+    <section class="sc-stage" data-variant="Run workspace" aria-label="Run workspace proposal">
+      <div class="sc-window" data-design="workspace" aria-label="Run workspace controls">
+        <header class="sc-chrome">
+          <div class="sc-identity"><span class="sc-name">Shaker Control</span><span class="sc-caption">Design proposal · illustrative data</span></div>
+          <div class="sc-toolbar">
+            <label>Test <select data-mode aria-label="Test mode"><option value="random">Random vibration</option><option value="sine">Sine sweep</option><option value="monitor">Monitor only</option></select></label>
+            <span>Simulation</span><span class="sc-state" data-status aria-live="polite">Ready</span>
+            <button type="button" class="sc-primary" data-start>Start simulation</button><button type="button" class="sc-stop" data-stop disabled>Stop</button>
+          </div>
+        </header>
+        <div class="sc-summary"><span data-target-summary>Target 100–500 Hz · 0.999 g RMS</span><span>Control Accel · simulated</span><span data-config-summary>51,200 Hz · 1 s blocks</span><span data-log-summary>Recording enabled</span></div>
+        <div class="sc-alert" data-alert role="alert" hidden><span>Initialization failed. No output is running.</span><button type="button" data-dismiss>Dismiss fault</button></div>
+        <nav class="sc-nav" aria-label="Run workspace views"><button type="button" data-view="run" aria-pressed="true">Run</button><button type="button" data-setup-toggle aria-pressed="false">Set up test</button><button type="button" data-view="results" aria-pressed="false">Results</button></nav>
+        <main class="sc-main">
+          <section data-run-pane>
+            <dl class="sc-readouts"><div><dt data-measure-label>Measured g RMS</dt><dd data-measured>—</dd></div><div><dt data-ramp-label>Ramp level</dt><dd data-ramp>10%</dd></div><div><dt data-output-label>AO clipping</dt><dd data-clipping>—</dd></div></dl>
+            <h3 class="sc-heading" data-plot-title>Response PSD</h3><svg class="sc-plot" role="img" aria-label="Target PSD and illustrative measured response" data-plot></svg>
+            <div class="sc-legend"><span data-measured-legend><span class="sc-measured-key"></span>Measured · illustrative</span><span data-target-legend><span class="sc-target-key"></span>Target</span></div>
+            <div class="sc-status-note" data-plot-note>No samples yet · target profile shown</div>
+            <details><summary>Diagnostics</summary><div class="sc-setup-note" data-diagnostics>AO limit ±1.8 V · RMS limit 1.4 V · crest factor limit 5 · equalizer 36 bands</div></details>
+          </section>
+          <aside class="sc-setup" data-setup-pane hidden>
+            <h3 class="sc-heading">Test setup</h3>
+            <label class="sc-field"><span>Sample rate [Hz]</span><input data-fs type="number" value="51200" min="1000" step="100"></label>
+            <label class="sc-field"><span>Initial ramp level [%]</span><input data-level type="number" value="10" min="0" max="100" step="1"></label>
+            <label class="sc-field"><span>Recording</span><select data-record><option value="on">Enabled</option><option value="off">Disabled</option></select></label>
+            <div class="sc-setup-note" data-mode-note>Target PSD 100–500 Hz</div>
+            <div class="sc-error" data-validation role="alert" hidden></div>
+            <button type="button" class="sc-primary" data-apply>Apply setup</button>
+            <details><summary>Advanced tuning</summary><div class="sc-setup-note">PI gains · equalizer adaptation · buffer and PSD resolution</div></details>
+          </aside>
+          <section class="sc-review" data-result-pane hidden><h3 class="sc-heading">Run review</h3><dl><div><dt>Backend</dt><dd>Simulation preview</dd></div><div><dt>Settings</dt><dd data-review-target>100–500 Hz · 0.999 g RMS</dd></div><div><dt>Run state</dt><dd data-review-state>No run yet</dd></div><div><dt>Data location</dt><dd>Preview only · no file written</dd></div></dl></section>
+        </main>
+      </div>
+    </section>
+    <section class="sc-stage" data-variant="Guided setup" aria-label="Guided setup proposal" hidden>
+      <div class="sc-window" data-design="guided" aria-label="Guided setup controls">
+        <header class="sc-chrome">
+          <div class="sc-identity"><span class="sc-name">Shaker Control</span><span class="sc-caption">Design proposal · illustrative data</span></div>
+          <div class="sc-toolbar"><label>Test <select data-mode aria-label="Test mode"><option value="random">Random vibration</option><option value="sine">Sine sweep</option><option value="monitor">Monitor only</option></select></label><span>Simulation</span><span class="sc-state" data-status aria-live="polite">Draft setup</span><button type="button" class="sc-primary" data-start disabled>Start simulation</button><button type="button" class="sc-stop" data-stop disabled>Stop</button></div>
+        </header>
+        <div class="sc-summary"><span class="sc-step" data-step><strong>Set up</strong> → Ready → Run → Review</span><span data-target-summary>Target 100–500 Hz · 0.999 g RMS</span><span data-config-summary>51,200 Hz · 1 s blocks</span><span data-log-summary>Recording enabled</span></div>
+        <div class="sc-alert" data-alert role="alert" hidden><span>Initialization failed. No output is running.</span><button type="button" data-dismiss>Dismiss fault</button></div>
+        <nav class="sc-nav" aria-label="Guided workflow views"><button type="button" data-view="setup" aria-pressed="true">Set up</button><button type="button" data-view="run" aria-pressed="false">Run</button><button type="button" data-view="results" aria-pressed="false">Review</button></nav>
+        <main class="sc-main sc-guided-setup">
+          <section class="sc-setup" data-setup-pane>
+            <h3 class="sc-heading">Set up the test</h3>
+            <label class="sc-field"><span>Sample rate [Hz]</span><input data-fs type="number" value="51200" min="1000" step="100"></label>
+            <label class="sc-field"><span>Initial ramp level [%]</span><input data-level type="number" value="10" min="0" max="100" step="1"></label>
+            <label class="sc-field"><span>Recording</span><select data-record><option value="on">Enabled</option><option value="off">Disabled</option></select></label>
+            <div class="sc-setup-note" data-mode-note>Target PSD 100–500 Hz</div>
+            <div class="sc-error" data-validation role="alert" hidden></div><button type="button" class="sc-primary" data-apply>Validate setup</button>
+            <details><summary>Advanced tuning</summary><div class="sc-setup-note">PI gains · equalizer adaptation · buffer and PSD resolution</div></details>
+          </section>
+          <section class="sc-review" data-ready-pane><h3 class="sc-heading">Effective setup</h3><dl><div><dt>Control channel</dt><dd>Control Accel · simulated</dd></div><div><dt>Target</dt><dd data-review-target>100–500 Hz · 0.999 g RMS</dd></div><div><dt>Voltage ceiling</dt><dd data-voltage>±1.8 V</dd></div><div><dt>Configuration</dt><dd data-ready-status>Draft · validate to use</dd></div></dl></section>
+          <section data-run-pane hidden>
+            <dl class="sc-readouts"><div><dt data-measure-label>Measured g RMS</dt><dd data-measured>—</dd></div><div><dt data-ramp-label>Ramp level</dt><dd data-ramp>10%</dd></div><div><dt data-output-label>AO clipping</dt><dd data-clipping>—</dd></div></dl>
+            <h3 class="sc-heading" data-plot-title>Response PSD</h3><svg class="sc-plot" role="img" aria-label="Target PSD and illustrative measured response" data-plot></svg>
+            <div class="sc-legend"><span data-measured-legend><span class="sc-measured-key"></span>Measured · illustrative</span><span data-target-legend><span class="sc-target-key"></span>Target</span></div><div class="sc-status-note" data-plot-note>No samples yet · target profile shown</div>
+            <details><summary>Diagnostics</summary><div class="sc-setup-note" data-diagnostics>AO limit ±1.8 V · RMS limit 1.4 V · crest factor limit 5 · equalizer 36 bands</div></details>
+          </section>
+          <section class="sc-review" data-result-pane hidden><h3 class="sc-heading">Run review</h3><dl><div><dt>Backend</dt><dd>Simulation preview</dd></div><div><dt>Run state</dt><dd data-review-state>No run yet</dd></div><div><dt>Data location</dt><dd>Preview only · no file written</dd></div></dl></section>
+        </main>
+      </div>
+    </section>
+  </div>
+  <script>
+    (() => {
+      const root = document.getElementById('shaker-flow-proposal');
+      const defaults = {
+        random: { target: '100–500 Hz · 0.999 g RMS', rate: 51200, level: 10, label: 'Measured g RMS', title: 'Response PSD', measured: '0.98 g RMS', note: 'Target PSD 100–500 Hz', diagnostic: 'AO limit ±1.8 V · RMS limit 1.4 V · crest factor limit 5 · equalizer 36 bands' },
+        sine: { target: '20–2,000 Hz · 3 g peak', rate: 51200, level: 20, label: 'Measured g peak', title: 'Acceleration vs frequency', measured: '2.92 g peak', note: '1 octave/min · 3 s initial settling · calibration source not recorded', diagnostic: 'Drive-table amplitude · 1 octave/min · measured peak is an estimate · AO limit ±1.8 V' },
+        monitor: { target: 'Monitor only · no drive output', rate: 2048, level: 0, label: 'Acceleration g RMS', title: 'Acceleration time history', measured: '0.46 g RMS', note: '2 s history · 0.25 s PSD window · 512-sample acquisition blocks', diagnostic: 'Analysis-only controls · 0.25 s effective PSD window · 512 samples per segment' }
+      };
+      root.querySelectorAll('[data-design]').forEach(shell => {
+        const guided = shell.dataset.design === 'guided';
+        const state = { mode: 'random', phase: 'ready', dirty: guided, view: guided ? 'setup' : 'run', details: false, ran: false, fault: false };
+        const q = s => shell.querySelector(s);
+        const qa = s => Array.from(shell.querySelectorAll(s));
+        const main = q('.sc-main');
+        const active = () => state.phase === 'starting' || state.phase === 'running' || state.phase === 'stopping';
+        function validate() {
+          const rate = Number(q('[data-fs]').value);
+          const level = Number(q('[data-level]').value);
+          if (!Number.isFinite(rate) || rate <= (state.mode === 'sine' ? 4000 : state.mode === 'random' ? 1000 : 0)) return 'Sample rate must exceed twice the maximum test frequency.';
+          if (state.mode !== 'monitor' && rate < 4096) return 'A 1 s block must contain the 4,096-sample PSD segment.';
+          if (!Number.isFinite(level) || level < 0 || level > 100) return 'Initial ramp level must be between 0% and 100%.';
+          return '';
+        }
+        function drawPlot() {
+          const svg = q('[data-plot]');
+          if (!svg || svg.closest('[hidden]')) return;
+          const width = Math.max(250, Math.floor(svg.getBoundingClientRect().width));
+          const height = 300, left = width < 400 ? 55 : 70, right = 20, top = 35, bottom = 45;
+          const innerW = width - left - right, innerH = height - top - bottom;
+          const css = getComputedStyle(shell), text = css.getPropertyValue('--sc-text').trim(), line = css.getPropertyValue('--sc-line').trim();
+          const targetColor = css.getPropertyValue('--sc-muted').trim(), measuredColor = css.getPropertyValue('--sc-accent').trim();
+          const ns = 'http://www.w3.org/2000/svg';
+          svg.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
+          svg.replaceChildren();
+          function node(type, attrs, content) {
+            const el = document.createElementNS(ns, type);
+            Object.entries(attrs).forEach(([key, value]) => el.setAttribute(key, value));
+            if (content !== undefined) el.textContent = content;
+            svg.appendChild(el);
+            return el;
+          }
+          node('title', {}, state.mode === 'monitor' ? 'Illustrative acceleration trace in g over 2 seconds' : 'Configured target and illustrative measured response');
+          let x, y, xticks, yticks, xunit, yunit, target, measured;
+          if (state.mode === 'random') {
+            x = f => left + (f - 100) / 400 * innerW;
+            y = v => top + (Math.log10(.006) - Math.log10(v)) / (Math.log10(.006) - Math.log10(.0005)) * innerH;
+            xticks = [100, 300, 500]; yticks = [.001, .002, .004]; xunit = 'Frequency [Hz]'; yunit = 'PSD [g²/Hz]';
+            const knots = [[100,.001],[300,.004],[350,.004],[500,.001]];
+            target = [];
+            for (let segment = 0; segment < knots.length - 1; segment++) {
+              const a = knots[segment], b = knots[segment + 1];
+              for (let step = 0; step <= 32; step++) {
+                const fraction = step / 32;
+                target.push([a[0] * Math.pow(b[0] / a[0], fraction), a[1] * Math.pow(b[1] / a[1], fraction)]);
+              }
+            }
+            measured = [[100,.00095],[180,.00185],[260,.0028],[300,.0037],[350,.00385],[420,.002],[500,.00098]];
+          } else if (state.mode === 'sine') {
+            x = f => left + Math.log10(f / 20) / 2 * innerW;
+            y = v => top + (3.5 - v) / 3.5 * innerH;
+            xticks = [20, 200, 2000]; yticks = [0,1,2,3]; xunit = 'Frequency [Hz]'; yunit = 'Acceleration [g peak]';
+            target = [[20,3],[2000,3]];
+            measured = [[20,2.8],[40,2.9],[80,3.02],[160,2.95],[320,2.88],[640,2.97],[1280,2.92],[2000,2.91]];
+          } else {
+            x = t => left + (t + 2) / 2 * innerW;
+            y = v => top + (1 - v) / 2 * innerH;
+            xticks = [-2,-1,0]; yticks = [-1,0,1]; xunit = 'Time [s]'; yunit = 'Acceleration [g]'; target = [];
+            measured = Array.from({length:160}, (_, i) => { const t = -2 + 2 * i / 159; return [t, .6 * Math.sin(2 * Math.PI * 6 * t) + .1 * Math.sin(2 * Math.PI * 15 * t)]; });
+          }
+          node('text', {x:left, y:18, fill:text, 'font-size':12}, yunit);
+          yticks.forEach(value => {
+            node('line', {x1:left,y1:y(value),x2:width-right,y2:y(value),stroke:line,'stroke-width':1});
+            node('text', {x:left-9,y:y(value)+4,fill:text,'font-size':12,'text-anchor':'end'}, String(value));
+          });
+          xticks.forEach(value => {
+            node('line', {x1:x(value),y1:top,x2:x(value),y2:height-bottom,stroke:line,'stroke-width':1});
+            node('text', {x:x(value),y:height-bottom+20,fill:text,'font-size':12,'text-anchor':'middle'}, String(value));
+          });
+          node('text', {x:left+innerW/2,y:height-6,fill:text,'font-size':12,'text-anchor':'middle'}, xunit);
+          function path(points, color, dashed) {
+            if (!points.length) return;
+            const d = points.map((point,index) => (index ? 'L' : 'M') + x(point[0]) + ' ' + y(point[1])).join(' ');
+            node('path', {d,fill:'none',stroke:color,'stroke-width':2,'stroke-dasharray':dashed ? '6 4' : 'none'});
+          }
+          path(target, targetColor, true);
+          if (state.ran) path(measured, measuredColor, false);
+        }
+        function render() {
+          const model = defaults[state.mode];
+          const running = active();
+          const error = validate();
+          q('[data-status]').textContent = state.fault ? 'Fault · output stopped' : state.dirty ? 'Draft changes' : ({ready:'Ready',starting:'Starting…',running:'Running · simulation',stopping:'Stopping…',stopped:'Stopped'})[state.phase];
+          q('[data-alert]').hidden = !state.fault;
+          q('[data-start]').disabled = running || state.dirty || state.fault || Boolean(error);
+          q('[data-start]').textContent = state.mode === 'monitor' ? 'Start acquisition' : 'Start simulation';
+          q('[data-stop]').disabled = !running || state.phase === 'stopping';
+          q('[data-mode]').disabled = running;
+          qa('[data-fs], [data-level], [data-record], [data-apply], [data-setup-toggle]').forEach(el => { el.disabled = running; });
+          q('[data-level]').disabled = running || state.mode === 'monitor';
+          q('[data-level]').closest('label').hidden = state.mode === 'monitor';
+          q('[data-record]').closest('label').hidden = state.mode === 'monitor';
+          q('[data-target-summary]').textContent = state.mode === 'monitor' ? model.target : 'Target ' + model.target;
+          q('[data-config-summary]').textContent = Number(q('[data-fs]').value).toLocaleString() + ' Hz · ' + (state.mode === 'monitor' ? '512-sample blocks' : '1 s blocks');
+          q('[data-log-summary]').textContent = state.mode === 'monitor' ? 'Analysis only' : 'Recording ' + (q('[data-record]').value === 'on' ? 'enabled' : 'disabled');
+          qa('[data-review-target]').forEach(el => { el.textContent = model.target; });
+          q('[data-mode-note]').textContent = model.note;
+          q('[data-validation]').hidden = !error;
+          q('[data-validation]').textContent = error;
+          q('[data-measure-label]').textContent = model.label;
+          q('[data-measured]').textContent = state.ran ? model.measured : '—';
+          q('[data-ramp-label]').textContent = state.mode === 'monitor' ? 'History window' : 'Ramp level';
+          q('[data-ramp]').textContent = state.mode === 'monitor' ? '2.0 s' : (state.ran ? '100%' : q('[data-level]').value + '%');
+          q('[data-output-label]').textContent = state.mode === 'monitor' ? 'PSD window' : 'AO clipping';
+          q('[data-clipping]').textContent = state.mode === 'monitor' ? '0.25 s' : state.ran ? '0.0%' : '—';
+          q('[data-plot-title]').textContent = model.title;
+          q('[data-plot]').setAttribute('aria-label', model.title + (state.ran ? ' · illustrative preview' : ' · awaiting samples'));
+          q('[data-plot-note]').textContent = state.ran ? 'Illustrative preview · no DAQ connected' : state.mode === 'monitor' ? 'No samples yet' : 'No samples yet · target profile shown';
+          q('[data-measured-legend]').hidden = !state.ran;
+          q('[data-target-legend]').hidden = state.mode === 'monitor';
+          q('[data-diagnostics]').textContent = model.diagnostic;
+          q('[data-review-state]').textContent = state.ran ? (state.phase === 'stopped' ? 'Stopped · preview retained' : 'Preview run active') : 'No run yet';
+          const onSetup = guided && state.view === 'setup';
+          q('[data-run-pane]').hidden = state.view !== 'run';
+          q('[data-result-pane]').hidden = state.view !== 'results';
+          q('[data-setup-pane]').hidden = guided ? !onSetup : !state.details || state.view !== 'run';
+          if (guided) {
+            q('[data-ready-pane]').hidden = !onSetup;
+            q('[data-ready-status]').textContent = state.dirty ? 'Draft · validate to use' : 'Validated · ready to start';
+            q('[data-voltage]').textContent = state.mode === 'monitor' ? 'No drive output' : '±1.8 V';
+            q('[data-step]').innerHTML = state.dirty ? '<strong>Set up</strong> → Ready → Run → Review' : state.phase === 'running' ? 'Set up → Ready → <strong>Run</strong> → Review' : state.phase === 'stopped' ? 'Set up → Ready → Run → <strong>Review</strong>' : 'Set up → <strong>Ready</strong> → Run → Review';
+          }
+          main.classList.toggle('sc-with-setup', !guided && state.details && state.view === 'run');
+          main.classList.toggle('sc-guided-setup', onSetup);
+          qa('[data-view]').forEach(el => { el.setAttribute('aria-pressed', String(el.dataset.view === state.view)); if (el.dataset.view === 'setup') el.disabled = running; });
+          if (!guided) q('[data-setup-toggle]').setAttribute('aria-pressed', String(state.details && state.view === 'run'));
+          requestAnimationFrame(drawPlot);
+        }
+        q('[data-mode]').addEventListener('change', event => {
+          state.mode = event.target.value; state.dirty = true; state.ran = false; state.phase = 'ready';
+          q('[data-fs]').value = defaults[state.mode].rate; q('[data-level]').value = defaults[state.mode].level;
+          if (guided) state.view = 'setup'; else state.details = true;
+          render();
+        });
+        qa('[data-fs], [data-level], [data-record]').forEach(el => el.addEventListener('input', () => { state.dirty = true; render(); }));
+        q('[data-apply]').addEventListener('click', () => { if (!validate()) { state.dirty = false; state.phase = 'ready'; render(); } });
+        q('[data-start]').addEventListener('click', () => {
+          if (active() || state.dirty || state.fault || validate()) return;
+          state.phase = 'starting'; state.view = 'run'; state.details = false; render();
+          setTimeout(() => { if (state.phase === 'starting' && !state.fault) { state.phase = 'running'; state.ran = true; render(); } }, 350);
+        });
+        q('[data-stop]').addEventListener('click', () => {
+          if (!active()) return;
+          state.phase = 'stopping'; render();
+          setTimeout(() => { state.phase = 'stopped'; render(); }, 250);
+        });
+        q('[data-dismiss]').addEventListener('click', () => { state.fault = false; state.phase = 'stopped'; render(); });
+        qa('[data-view]').forEach(el => el.addEventListener('click', () => { state.view = el.dataset.view; render(); }));
+        if (!guided) q('[data-setup-toggle]').addEventListener('click', () => { state.details = !state.details; state.view = 'run'; render(); });
+        render();
+        new ResizeObserver(() => { requestAnimationFrame(drawPlot); }).observe(shell);
+        if (globalThis.Tweak) {
+          const tweak = new Tweak({container:shell,onChange:() => { if (state.fault) state.phase = 'stopped'; render(); }});
+          tweak.addToggle(state, 'fault', {label:'Show retained fault'});
+        }
+      });
+    })();
+  </script>
+</div>

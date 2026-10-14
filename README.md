@@ -35,20 +35,52 @@ and configured channels are also required; pip does not install that driver.
 python app.py
 ```
 
-The application opens three tabs: **Configuration**, **Controller**, and
-**Real-Time Data**. Before starting a simulation, select **Enable Simulation
-Mode** and click **Apply Configuration**. Alternatively, set
-`SIMULATION_MODE = True` in `config.py` before launching.
+The workspace opens on **Run**, with a large mode-specific response plot. Test
+mode, backend, run state, **Set up test**, **Start**, and **Stop** stay visible
+across **Run**, **Channels**, **Diagnostics**, and **Results**.
 
-The checked-in configuration selects **hardware mode**. If `nidaqmx` is absent,
-or hardware initialization fails, the controller falls back to simulation and
-prints the mode to the console. A simulated run is not a hardware measurement.
+1. Choose **Random vibration** or **Sine sweep** and **Hardware** or **Simulation**.
+2. Open **Set up test**. Enter the target, acquisition settings, voltage limits,
+   and hardware channels/sensitivity or simulation parameters. Only the selected
+   mode and backend controls are shown. Sine acceleration explicitly uses g peak
+   or g RMS; ramp controls use acceleration amplitude percent.
+3. Click **Apply setup**. Invalid combinations show field errors. Unapplied draft
+   changes disable Start. Apply remains visible below the scrolling setup form.
+4. Click **Start simulation** or **Start hardware**. The workspace shows Starting
+   until the selected backend and requested recording initialize successfully.
+5. Use **Stop** from any view, or allow a nonrepeating sweep to reach Complete.
+   **Results** retains the outcome, captured setup, actual backend, last-block
+   metrics, clock/input mode, calibration source, and recording folder.
 
-Choose **Random Vibration** or **Sine Sweep**, apply settings, then use **Start
-Controller** and **Stop Controller**. Stop before changing settings. GUI edits
-update the in-memory configuration for that session; they do not save `config.py`.
-DAQ channel names, accelerometer sensitivity, the random PSD profile, and the
-sine drive table are configured in `config.py`.
+The checked-in defaults request **hardware**. Missing bindings or initialization
+errors produce a retained **Fault**; they never select simulation automatically.
+The fault banner offers an explicit switch to simulation, followed by Apply and
+Start. A simulated run is not a hardware measurement. Dismiss clears the banner;
+starting another run clears the previous fault while Results retains its report.
+
+Each run captures an immutable, validated setup. Acquisition settings, mode,
+backend, and preset controls are locked until its worker finishes cleanup. Stop
+also works during Starting. Stopping and closing wait asynchronously for finite
+I/O and recording finalization; an active thread is not discarded on a timer.
+
+**Load preset** and **Save preset** use JSON setup files. Loading validates before
+changing accepted settings and records the source path without rewriting the
+imported file. GUI edits persist for the session or in a saved preset; they do not
+rewrite `config.py`, which supplies launch defaults. Targets, sine drive tables,
+calibration provenance, channels, sensitivity, and recording path are editable in
+the setup panel. Optional advanced simulation and control defaults remain in
+`config.py` and are included in captured settings.
+
+Validation requires ordered positive PSD points below 95% of Nyquist for random
+equalizer filters, sine frequencies below Nyquist, a PSD segment that fits one
+processing block, and a DAQ buffer at least one block long. Random PSD estimation
+must place at least one bin in the target band.
+The setup summary and command scaling share the captured piecewise PSD integral.
+Zero PI gains are allowed; random ramp starts support 0–200% and sine starts
+0–100%, matching their
+engines. The controller and channel viewer use the same accepted sample rate and
+effective channel count. Applying settings or starting a new run clears live
+curves and histories; earlier reports remain in Results for the session.
 
 ### Random vibration
 
@@ -87,7 +119,9 @@ Measured acceleration is displayed and logged; it does not close an amplitude
 feedback loop. The drive table must match the actual shaker, fixture, and load.
 Displayed g-peak is estimated as sqrt(2) times block standard deviation, assuming
 a sinusoidal response; noise and harmonics affect this estimate. The plot and
-CSV summary retain the largest estimate during each frequency dwell.
+CSV summary retain the largest estimate during each frequency dwell. The plot
+retains the maximum at each frequency across repeated sweeps. Both ascending and
+descending sweeps include the exact endpoint; nonrepeating sweeps then complete.
 
 The calibration CLI iteratively adjusts voltage at each frequency to produce a
 target acceleration. For an explicit simulation example:
@@ -100,28 +134,40 @@ python record_1g_sine_sweep.py --simulation \
 
 Use `--help` for frequency spacing, tolerances, iteration counts, and voltage
 limits. `--hardware` explicitly selects hardware and fails if it is unavailable.
-Copy the generated frequency/voltage pairs into `SINE_SWEEP_DRIVE_TABLE` after
-reviewing their provenance. The GUI table assumes a 1 g-peak calibration;
-normalize tables generated for another target before using them.
+Paste the generated frequency/voltage pairs into the GUI drive table (or set
+`SINE_SWEEP_DRIVE_TABLE`) after reviewing their provenance. Record the calibration
+source in setup or `SINE_SWEEP_CALIBRATION_SOURCE`. The table assumes a 1 g-peak
+calibration; normalize tables generated for another target before using them.
 
 `sine_sweep.py` contains reusable generation/interpolation utilities and is not
 a standalone application.
 
 ## Run the accelerometer monitor
 
-Set `SIMULATION_MODE = True` in `monitor_config.py` for synthetic traces, then:
-
 ```bash
 python accel_monitor.py
 ```
 
 This separate application displays multichannel acceleration in g and PSD in
-g²/Hz, with an adjustable PSD window. Its default hardware configuration has
+g²/Hz using the same channel colors and plot styling as the controller. Select
+**Simulation** explicitly for synthetic traces, then **Start acquisition**. Its
+default hardware configuration has
 one channel (`Dev1/ai0`) at 2,048 Hz, with 512-sample blocks. Add entries to
-`CHANNELS` in `monitor_config.py` for additional inputs; configure each channel's
-label, sensitivity in mV/g, IEPE excitation, and terminal configuration there.
-Use **Start** and **Stop** to control acquisition. Missing Python hardware bindings
-select simulation; hardware initialization errors are reported by the worker.
+**Channels / acquisition** while stopped, or set launch defaults in
+`monitor_config.py`. The dialog edits physical inputs, labels, sensitivity in
+mV/g, IEPE current in mA, input type, terminal configuration, sample rate, and block
+size. Acquisition settings are locked during a run; analysis duration stays
+editable. Backend errors retain Fault until another start, with no simulation
+fallback. Stop and window close finish acquisition asynchronously.
+
+The time view shows the latest two seconds by default. A separate history buffer
+retains the maximum selectable PSD duration (ten seconds by default). The PSD
+control reports the **effective** segment duration and frequency-bin spacing,
+including a collecting state until enough samples arrive. A ten-second selection
+therefore reaches ten seconds of data rather than remaining limited to the time
+view. Each refresh uses the latest selected segment; this is a live estimate, not
+a whole-run qualification report. The monitor does not command shaker output or
+record run files.
 
 ## Current controller defaults
 
@@ -162,20 +208,38 @@ and crest factor describe the final waveform after both limiters, before the
 controller's separate absolute voltage clip. Peak compression can alter PSD and
 introduce harmonics; it does not guarantee acceleration tracking.
 
-Each logged GUI run creates a timestamped directory containing:
+The Run view separates the full PSD target, ramp-adjusted target, and averaged
+control response. Channels uses consistent colors for time and PSD traces.
+Diagnostics separates acceleration, ramp/clipping percentage, plant gain in g/V,
+and random equalizer amplitude gains into unit-specific plots. Histories use
+elapsed seconds. **AO clipping** counts samples exceeding the peak voltage limit
+before the final clip; it differs from the near-limit fraction used for sine
+backoff. Voltage and crest metrics shown in the workspace describe the command
+after the absolute clip.
+
+Each logged GUI run creates a unique timestamped directory containing:
 
 - `data.h5`: AO voltage and AI acceleration blocks stored as float32, plus sample
-  rate and per-block timestamps, level fraction, and saturation fraction.
+  rate and per-block timestamps, applied level fraction, and near-limit fraction.
+  Schema version 2 attributes include backend, units, setup ID, settings JSON,
+  input mode, and clock routing. Sine frequency and acceleration metadata now have
+  one row per acquired block, matching the timestamp array.
+- `settings.json`: the frozen effective setup, including target, channel labels,
+  calibration/preset source, backend selection, and recording settings.
+- `run-summary.json`: final outcome/error, effective backend, duration, blocks,
+  last metrics, setup ID, and recording path.
 - `preview_psd.csv`: random-run PSD of the last recorded block, per channel.
 - `sine_summary.csv`: sine-run frequency, measured g-peak, and target g-peak.
 
-CSV summaries are exported when the logger closes. They are previews, not a
+CSV summaries and the final run report are written when the logger closes.
+Requested recording failures fault the run instead of silently disabling logging.
+CSV summaries are previews, not a
 whole-run PSD qualification report. Logs and generated calibration tables are
 ignored by Git.
 
 ## Checks and remaining limitations
 
-Install the test dependencies and run the numerical regression suite:
+Install the test dependencies and run the regression suite:
 
 ```bash
 python -m pip install -r requirements-dev.txt
@@ -183,14 +247,21 @@ python -m pytest -q
 python -m pip check
 ```
 
-Tests cover measured output crest factor, sparse impulses, unchanged acceptable
-signals, extreme amplitudes, invalid inputs, RMS limiting including DC, and final
-combined-limiter statistics. They do not open DAQ tasks or operate a shaker.
+Tests cover numerical limiting, immutable setup validation, presets, GUI draft
+and run states, startup failure/retry, explicit backend handling, Stop/close
+cleanup, plot resets and equalizer legends, exact sine endpoints, recording
+metadata, and monitor PSD retention. Qt workflow tests run offscreen with real
+simulation workers and prohibit opening real NI-DAQ tasks. No extra Qt test
+plugin is required beyond the pinned PySide6 and pytest dependencies.
 
 The PI controller currently has no anti-windup mechanism. Random mode reports
 saturation without automatic level backoff; sine mode has saturation backoff.
-Hardware control I/O uses unbounded waits, and stopping/closing the GUI has
-bounded thread waits; stop behavior still needs hardware validation. Simulation
+Controller block I/O uses finite timeouts and Stop remains pending until cleanup
+finishes; driver calls, output behavior, and stop latency still need hardware
+validation. NI acceleration-channel fallback to voltage scaling is reported in
+the run. Failed requests for shared AI/AO clocks fault the run; selecting
+independent clocks requires an explicit setup change. Reported routing does not
+prove synchronized or calibrated acquisition. Simulation
 includes prescribed resonances, noise, delay, and nonlinearity, rather than a
 validated model of a particular shaker. Tracking accuracy, stability, and physical
 protection require separate evidence for the configured equipment and load.
@@ -199,14 +270,29 @@ protection require separate evidence for the configured equipment and load.
 
 | File | Responsibility |
 |---|---|
-| `app.py` | Controller GUI, acquisition worker, and run logger |
+| `app.py` | Desktop entry point, acquisition worker, and run logger |
+| `workspace_ui.py` | Run workspace, setup, channels, diagnostics, and results |
+| `run_settings.py` | Immutable setup capture, validation, and target summaries |
 | `config.py` | Controller, hardware, simulation, target, and sweep settings |
 | `rv_controller.py` | Random control, equalization, noise generation, and limiters |
 | `simulation.py` | Synthetic plant and mock DAQ |
 | `sine_sweep.py` | Sweep generators, oscillator, and drive-table interpolation |
 | `record_1g_sine_sweep.py` | Command-line drive calibration |
 | `accel_monitor.py` / `monitor_config.py` | Standalone multichannel monitor |
-| `tests/test_limiters.py` | Numerical limiter regressions |
+| `tests/` | Numerical, setup, controller/monitor workflow, preset, and recording regressions |
 | `requirements*.txt` | Runtime, test, and optional hardware dependency pins |
+
+## UI audit and review evidence
+
+The [design audit](docs/design-audit/audit-report.html) and
+[interactive proposal](docs/design-audit/ui-flow-proposal.html) describe the
+baseline at commit `3aa27a9`. The implemented workspace is captured in
+[Run](docs/ui-workspace/03-random-run.png),
+[setup](docs/ui-workspace/02-setup.png), and
+[monitor](docs/ui-workspace/08-monitor.png) screenshots.
+[Validation details](docs/ui-workspace/validation.json) retain the checked source
+hashes, regression results, and limits. Captures use offscreen Qt and simulation;
+they do not establish hardware behavior. Raw local captures remain in ignored
+`output/`; portable review copies are kept in `docs/`.
 
 License: MIT; see `LICENSE`.

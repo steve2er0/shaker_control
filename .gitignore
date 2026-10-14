@@ -1,6 +1,9 @@
 # Data logging output
 data_logs/
 
+# Local audit captures and generated validation output; portable review copies live in docs/.
+/output/
+
 # Sine sweep configuration files
 1g_sine_sweep_config.txt
 

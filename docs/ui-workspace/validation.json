@@ -1,0 +1,66 @@
+{
+  "checked_at": "2026-10-14T16:52:01.708759-04:00",
+  "base_commit": "3aa27a97079e829889849822bec03df82a6fb415",
+  "delivery": "Pre-commit validation snapshot; delivered revision is recorded by Git history.",
+  "regression": {
+    "name": "pytest",
+    "errors": "0",
+    "failures": "0",
+    "skipped": "0",
+    "tests": "104",
+    "time": "20.212",
+    "timestamp": "2026-10-14T16:51:08.975082-04:00",
+    "command": ".venv/bin/python -B -m pytest -q -W error --tb=short -o faulthandler_timeout=25 --basetemp=.venv/pytest-git-delivery --junitxml=.venv/git-delivery-results.xml"
+  },
+  "checks": {
+    "git_diff_check": "passed",
+    "pip_check": "No broken requirements found",
+    "python_syntax": "all project and test sources parsed",
+    "native_qt_visuals": {
+      "screenshots": 8,
+      "size": [
+        1200,
+        800
+      ],
+      "sticky_apply_visible": true,
+      "stop_visible_with_setup": true,
+      "delivery_check": "Application and test hashes match the source used for the prior screenshot review; native UI was not recaptured during Git delivery."
+    }
+  },
+  "limitations": [
+    "Qt UI checked offscreen on macOS ARM64; no interactive hardware session",
+    "Tests use simulation and NI interface doubles; no real NI tasks opened",
+    "Physical output, stop latency, sustained tracking and shaker protection remain unverified"
+  ],
+  "source_sha256": {
+    "app.py": "35dcef78c817333718852eaddd07e98d7614414b1013a4ba05b41bf70f0f2635",
+    "workspace_ui.py": "58f643e9053ab968cb3aef7fdbc55871a78211428f79ade9db0f48780865c830",
+    "run_settings.py": "c5e8e93a26ec55b3fd784be8b7a547f6b19fc43c08b15969d9ca037f5a0650ef",
+    "accel_monitor.py": "e2cd0fb5e623ad3bc37f3ab3d5a6b40775990d8756b1e126e2c3a97a57f6d33d",
+    "sine_sweep.py": "26b34db9c6dbe3165ddfde5dec61c962738d32e95e771660bbec32b5c0bd6eb9",
+    "config.py": "41a422b02e241ed8b6cf6a97ceeec8baa9ecb4c90fcf2f3501675538be107448",
+    "monitor_config.py": "48c53fd433f20cf1c229437720558b7dc8c849fe1e960441dc775efd0d27cc36",
+    "README.md": "a41ca31a4461161f50f1c4ab9dc04c2e4666b6f1c8d7e8219bd227cdea718e14",
+    "tests/conftest.py": "792d9c2694e37a19d0ffd3787b22d3599d0e297153dc6ff17e37638bcd84819e",
+    "tests/test_acquisition_lifecycle.py": "82bc11f7d9a1293110fb543e907aebe02bd8270ed3a93ed6b279fb6183dedd12",
+    "tests/test_limiters.py": "5f888e4af275a943763557dc9929eeaad2099b93b7c23136544b7ebc25a0471c",
+    "tests/test_monitor.py": "b6d93e9633fbf19ec6a2351a0d2b94a8652ca74d957ddb2bd474af30596d3892",
+    "tests/test_presets.py": "f16fd36670fe6a4857e53a4d8086d5a4b12b4ee1b47c57e899a1a1fd24c2dcce",
+    "tests/test_run_settings.py": "31342cd6b103cbad6e9719c202b779f6551c613a3ee43c234093eaac6d468c0f",
+    "tests/test_workspace.py": "80bf5ed6112bb5944071d9f9f50b02bc979c1a6cad06272d37b3f160e11a46f0",
+    ".gitignore": "6b40c7df5ba2ac3041c0e9ae28bb5b7b08cfd8902397271713b0ddd3af18d7c5"
+  },
+  "artifacts": [
+    "docs/ui-workspace/01-ready.png",
+    "docs/ui-workspace/02-setup.png",
+    "docs/ui-workspace/03-random-run.png",
+    "docs/ui-workspace/04-channels.png",
+    "docs/ui-workspace/05-equalizer.png",
+    "docs/ui-workspace/06-results.png",
+    "docs/ui-workspace/07-sine-complete.png",
+    "docs/ui-workspace/08-monitor.png",
+    "docs/ui-workspace/checks.json",
+    "docs/ui-workspace/regression-results.xml",
+    "docs/ui-workspace/validation.json"
+  ]
+}

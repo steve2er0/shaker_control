@@ -1,0 +1,205 @@
+{
+  "backend": "Simulation only",
+  "screenshots": [
+    {
+      "path": "docs/ui-workspace/01-ready.png",
+      "width": 1200,
+      "height": 800
+    },
+    {
+      "path": "docs/ui-workspace/02-setup.png",
+      "width": 1200,
+      "height": 800
+    },
+    {
+      "path": "docs/ui-workspace/03-random-run.png",
+      "width": 1200,
+      "height": 800
+    },
+    {
+      "path": "docs/ui-workspace/04-channels.png",
+      "width": 1200,
+      "height": 800
+    },
+    {
+      "path": "docs/ui-workspace/05-equalizer.png",
+      "width": 1200,
+      "height": 800
+    },
+    {
+      "path": "docs/ui-workspace/06-results.png",
+      "width": 1200,
+      "height": 800
+    },
+    {
+      "path": "docs/ui-workspace/07-sine-complete.png",
+      "width": 1200,
+      "height": 800
+    },
+    {
+      "path": "docs/ui-workspace/08-monitor.png",
+      "width": 1200,
+      "height": 800
+    }
+  ],
+  "apply_visible": true,
+  "stop_visible_with_setup": true,
+  "final_controller_report": {
+    "outcome": "complete",
+    "backend": "Simulation",
+    "input_mode": "Synthetic acceleration",
+    "clock_status": "Synthetic sample clock",
+    "requested_backend": "Simulation",
+    "error": "",
+    "started_at": "2026-10-14T16:24:06.185894-04:00",
+    "duration_s": 1.771307084,
+    "blocks": 3,
+    "latest_metrics": {
+      "accel_rms_g": 0.5884748229957889,
+      "accel_peak_g": 0.8322290757957512,
+      "target_peak_g": 2.1590579509735104,
+      "target_rms_g": 1.5266845181081015,
+      "frequency_hz": 110.0,
+      "sweep_progress": 1.0,
+      "level_fraction": 0.7196859836578369,
+      "next_level_fraction": 1.0,
+      "saturation_fraction": 0.0,
+      "clipping_fraction": 0.0,
+      "plant_gain_g_per_v": 3.6172374780932404,
+      "output_rms_v": 0.1450467028008968,
+      "output_peak_v": 0.20512646278819519,
+      "output_cf": 1.4142097602161208,
+      "limiter_active": false,
+      "elapsed_s": 1.6547217500000002,
+      "block_index": 3
+    },
+    "settings": {
+      "revision": 2,
+      "fs": 8000.0,
+      "buf_seconds": 4.0,
+      "block_seconds": 0.1,
+      "welch_nperseg": 512,
+      "target_psd_points": [
+        [
+          100.0,
+          0.001
+        ],
+        [
+          300.0,
+          0.004
+        ],
+        [
+          350.0,
+          0.004
+        ],
+        [
+          500.0,
+          0.001
+        ]
+      ],
+      "test_mode": "sine_sweep",
+      "sine_start_hz": 100.0,
+      "sine_end_hz": 110.0,
+      "sine_g_level": 3.0,
+      "sine_g_level_is_rms": false,
+      "sine_octaves_per_min": 100.0,
+      "sine_repeat": false,
+      "sine_points_per_octave": 12.0,
+      "sine_step_dwell": 0.01,
+      "sine_default_vpk": 0.4,
+      "sine_drive_scale": 1.0,
+      "sine_drive_table": [
+        [
+          20.0,
+          0.781627
+        ],
+        [
+          40.0,
+          0.257444
+        ],
+        [
+          80.0,
+          0.115932
+        ],
+        [
+          160.0,
+          0.070388
+        ],
+        [
+          320.0,
+          0.073042
+        ],
+        [
+          640.0,
+          0.07207
+        ],
+        [
+          1280.0,
+          0.083739
+        ],
+        [
+          2000.0,
+          0.081658
+        ]
+      ],
+      "data_log_enabled": false,
+      "data_log_dir": "data_logs",
+      "initial_level_fraction": 0.1,
+      "max_level_fraction_rate": 2.0,
+      "kp": 0.9,
+      "ki": 0.06,
+      "sine_initial_level": 0.2,
+      "sine_max_level_rate": 0.5,
+      "sine_initial_settle": 0.0,
+      "eq_num_bands": 8,
+      "eq_adapt_rate": 0.2,
+      "eq_smooth_factor": 0.9,
+      "eq_adapt_level_threshold": 0.4,
+      "eq_adapt_level_power": 1.0,
+      "eq_adapt_min_weight": 0.0,
+      "max_crest_factor": 5.0,
+      "max_rms_volts": 1.4,
+      "ao_volt_limit": 1.8,
+      "accel_excitation_amps": 0.0021000000000000003,
+      "sync_ao_clock": false,
+      "simulation_mode": true,
+      "sim_plant_gain": 4.0,
+      "sim_noise_level": 0.02,
+      "device_ai": "Dev1/ai0",
+      "device_ao": "Dev1/ao0",
+      "accel_mv_per_g": 100.0,
+      "sim_resonances": [
+        [
+          150.0,
+          15.0,
+          3.0
+        ],
+        [
+          800.0,
+          25.0,
+          2.5
+        ]
+      ],
+      "sim_delay_samples": 5,
+      "sim_nonlinearity": 0.05,
+      "crest_soft_knee": 0.8,
+      "rms_limit_headroom": 0.9,
+      "eq_gain_limits": [
+        0.2,
+        10.0
+      ],
+      "calibration_source": "",
+      "preset_source": "",
+      "input_channel_labels": [
+        "Control Accel",
+        "Response 1",
+        "Response 2",
+        "Response 3"
+      ],
+      "num_input_channels": 4,
+      "realtime_psd_update_stride": 5
+    },
+    "config_id": "3e0610ed934a",
+    "log_dir": null
+  }
+}
