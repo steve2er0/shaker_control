@@ -321,56 +321,88 @@ def make_bandlimited_noise(n, bandpass_filter, equalizer):
     return y_eq
 
 
+def _finite_waveform(signal):
+    """Validate the single-channel waveform expected by the output limiters."""
+    if np.iscomplexobj(signal):
+        raise ValueError("Signal must be real-valued")
+    signal = np.asarray(signal, dtype=np.float64)
+    if signal.ndim != 1 or not np.all(np.isfinite(signal)):
+        raise ValueError("Signal must be a finite one-dimensional waveform")
+    return signal
+
+
+def _waveform_metrics(signal):
+    """Return true RMS (including DC) and crest factor without squaring huge values."""
+    peak = np.max(np.abs(signal)) if signal.size else 0.0
+    if peak == 0.0:
+        return 0.0, 0.0
+    scaled_rms = np.sqrt(np.mean((signal / peak) ** 2))
+    return float(peak * scaled_rms), float(1.0 / scaled_rms)
+
+
 def crest_factor_limit(signal, max_cf=4.0, soft_knee=0.8):
+    """Compress individual peaks to limit peak / output RMS.
+
+    ``max_cf`` must be finite and at least 1; ``soft_knee`` is in [0, 1]
+    (1 selects hard clipping). Acceptable waveforms are unchanged. Compression
+    never increases any sample's magnitude and does not modify the input.
+
+    RMS is sqrt(mean(signal**2)), including DC. After soft compression, a
+    bounded clipping search accounts for the reduced output RMS. If a sparse
+    waveform cannot meet the limit by attenuation, return a zero block rather
+    than claim a false reduction. Empty and zero blocks have crest factor 0.
+
+    Returns (limited_signal, measured_cf_before, measured_cf_after, active).
     """
-    Limit crest factor (peak/RMS ratio) of signal using soft compression
-    
-    Args:
-        signal: Input signal array
-        max_cf: Maximum allowed crest factor
-        soft_knee: Fraction of max_cf where soft limiting begins
-    
-    Returns:
-        tuple: (limited_signal, crest_factor_before, crest_factor_after, limiting_active)
-    """
-    if len(signal) == 0:
-        return signal, 0.0, 0.0, False
-    
-    # Calculate current RMS and peak
-    rms = np.std(signal)
-    if rms < 1e-12:  # Avoid division by zero
-        return signal, 0.0, 0.0, False
-    
-    peak = np.max(np.abs(signal))
-    current_cf = peak / rms
-    
-    # If crest factor is acceptable, return unchanged
+    signal = _finite_waveform(signal)
+    if not np.isfinite(max_cf) or max_cf < 1.0:
+        raise ValueError("max_cf must be finite and at least 1")
+    if not np.isfinite(soft_knee) or not 0.0 <= soft_knee <= 1.0:
+        raise ValueError("soft_knee must be finite and in [0, 1]")
+
+    _, current_cf = _waveform_metrics(signal)
     if current_cf <= max_cf:
         return signal, current_cf, current_cf, False
-    
-    # Apply soft compression above the knee
-    knee_cf = max_cf * soft_knee
-    limited_signal = signal.copy()
-    
-    if current_cf > knee_cf:
-        # Calculate compression ratio
-        excess_cf = current_cf - knee_cf
-        max_excess = max_cf - knee_cf
-        
-        # Apply soft limiting using tanh compression
-        scale_factor = knee_cf / current_cf + (max_cf - knee_cf) / current_cf * np.tanh(excess_cf / max_excess)
-        limited_signal = signal * scale_factor
-        
-        # Verify and adjust if needed
-        new_peak = np.max(np.abs(limited_signal))
-        new_cf = new_peak / rms
-        
-        if new_cf > max_cf:  # Hard limit if soft limiting wasn't enough
-            limited_signal = limited_signal * (max_cf * rms) / new_peak
-            new_cf = max_cf
+
+    # Work relative to the peak so very large or small voltages remain stable.
+    peak = np.max(np.abs(signal))
+    magnitudes = np.abs(signal / peak)
+    ceiling = max_cf / current_cf
+    knee = ceiling * soft_knee
+    compressed = magnitudes.copy()
+    if soft_knee == 1.0:
+        compressed = np.minimum(compressed, ceiling)
     else:
-        new_cf = current_cf
-    
+        above_knee = magnitudes > knee
+        width = ceiling - knee
+        compressed[above_knee] = knee + width * np.tanh(
+            (magnitudes[above_knee] - knee) / width
+        )
+
+    if _waveform_metrics(compressed)[1] > max_cf:
+        nonzero = compressed[compressed > 0.0]
+        # Even equal nonzero magnitudes have CF = sqrt(total / nonzero samples).
+        # A single impulse cannot be repaired by making that same impulse smaller.
+        if np.sqrt(signal.size / nonzero.size) > max_cf:
+            return np.zeros_like(signal), current_cf, 0.0, True
+
+        # The lower bound equalizes all nonzero magnitudes and is feasible.
+        # Choose the largest feasible clipping threshold to retain signal energy.
+        low, high = float(np.min(nonzero)), float(np.max(nonzero))
+        for _ in range(64):
+            threshold = low + (high - low) / 2.0
+            candidate = np.minimum(compressed, threshold)
+            if _waveform_metrics(candidate)[1] <= max_cf:
+                low = threshold
+            else:
+                high = threshold
+        compressed = np.minimum(compressed, low)
+
+    limited_signal = np.sign(signal) * compressed * peak
+    _, new_cf = _waveform_metrics(limited_signal)
+    # Guard rescaling underflow or other floating-point edge cases as well.
+    if new_cf > max_cf * (1.0 + 1e-12):
+        return np.zeros_like(signal), current_cf, 0.0, True
     return limited_signal, current_cf, new_cf, True
 
 
@@ -379,17 +411,20 @@ def rms_limit(signal, max_rms, headroom=0.9):
     Limit RMS level of signal
     
     Args:
-        signal: Input signal array
-        max_rms: Maximum allowed RMS level
-        headroom: Scale factor when limiting is active
+        signal: Finite one-dimensional input waveform
+        max_rms: Finite nonnegative true RMS limit (including DC)
+        headroom: Scale factor in [0, 1] when limiting is active
     
     Returns:
         tuple: (limited_signal, rms_before, rms_after, limiting_active)
     """
-    if len(signal) == 0:
-        return signal, 0.0, 0.0, False
-    
-    current_rms = np.std(signal)
+    signal = _finite_waveform(signal)
+    if not np.isfinite(max_rms) or max_rms < 0.0:
+        raise ValueError("max_rms must be finite and nonnegative")
+    if not np.isfinite(headroom) or not 0.0 <= headroom <= 1.0:
+        raise ValueError("headroom must be finite and in [0, 1]")
+
+    current_rms, _ = _waveform_metrics(signal)
     
     if current_rms <= max_rms:
         return signal, current_rms, current_rms, False
@@ -399,7 +434,8 @@ def rms_limit(signal, max_rms, headroom=0.9):
     scale_factor = target_rms / current_rms
     limited_signal = signal * scale_factor
     
-    return limited_signal, current_rms, target_rms, True
+    rms_after, _ = _waveform_metrics(limited_signal)
+    return limited_signal, current_rms, rms_after, True
 
 
 def apply_safety_limiters(signal, max_cf=4.0, max_rms=1.5, cf_soft_knee=0.8, rms_headroom=0.9):
@@ -407,10 +443,11 @@ def apply_safety_limiters(signal, max_cf=4.0, max_rms=1.5, cf_soft_knee=0.8, rms
     Apply both crest factor and RMS limiting to signal
     
     Returns:
-        tuple: (limited_signal, limiter_stats)
+        tuple: (limited_signal, limiter_stats). Output metrics describe the final
+        waveform after both limiters, before any separate absolute voltage clip.
     """
     # Apply RMS limiting first
-    signal_rms_limited, rms_before, rms_after, rms_limiting = rms_limit(signal, max_rms, rms_headroom)
+    signal_rms_limited, rms_before, _, rms_limiting = rms_limit(signal, max_rms, rms_headroom)
     
     # Then apply crest factor limiting
     signal_final, cf_before, cf_after, cf_limiting = crest_factor_limit(
@@ -418,7 +455,7 @@ def apply_safety_limiters(signal, max_cf=4.0, max_rms=1.5, cf_soft_knee=0.8, rms
     
     limiter_stats = {
         'rms_before': rms_before,
-        'rms_after': rms_after if rms_limiting else np.std(signal_final),
+        'rms_after': _waveform_metrics(signal_final)[0],
         'rms_limiting': rms_limiting,
         'cf_before': cf_before,
         'cf_after': cf_after,

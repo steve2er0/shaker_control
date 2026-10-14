@@ -1,195 +1,212 @@
-# Random Vibration Shaker Control System
+# Shaker Control
 
-A professional desktop application for random vibration testing with a modern GUI interface, multi-band equalization, adaptive control, and comprehensive safety features.
+Python desktop tools for random vibration control, stepped sine sweeps, and
+accelerometer monitoring. The GUIs use PySide6 and PyQtGraph; signal processing
+uses NumPy and SciPy. Acquisition can use a synthetic plant or NI-DAQ hardware.
 
-## 🖥️ **Desktop Application**
+The repository is a development application. Numerical limiter tests do not
+establish shaker performance, hardware stop behavior, or production qualification.
 
-This is a **PySide6-based desktop application** that provides a complete graphical interface for vibration testing. The main entry point is `app.py`, which launches a professional tabbed interface.
+## Install
 
-### 📁 **File Structure**
-```
-shaker_control/
-├── app.py                 # Main desktop application (GUI)
-├── config.py             # Configuration parameters
-├── rv_controller.py      # Control algorithms and equalizer
-├── simulation.py         # Plant simulator and mock DAQ
-├── sine_sweep.py         # Sine sweep testing functionality
-├── README.md             # This documentation
-└── LICENSE               # License file
-```
+Use a virtual environment. The pinned setup was validated with Python 3.9.6 on
+macOS ARM64. Use Python 3.9 to reproduce that setup; newer interpreter/platform
+combinations may require updated dependency pins and their own checks.
 
-## 🚀 **Quick Start**
-
-### **Launch the Desktop Application**
 ```bash
-python3 app.py
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
 ```
 
-This opens a professional desktop application with three main tabs:
-- **Configuration**: Adjust all system parameters
-- **Controller**: Start/stop control and view real-time plots
-- **Real-Time Data**: Monitor channel data and PSD analysis
+`requirements.txt` installs the GUI, numerical tools, and HDF5 logging support.
+Simulation does not require `nidaqmx`. For hardware support:
 
-## 🎯 **Application Features**
+```bash
+python -m pip install -r requirements-hardware.txt
+```
 
-### **Configuration Tab**
-- **System Parameters**: Sample rate, buffer duration, block duration, Welch segment length
-- **Control Parameters**: PI gains, level fraction settings, slew rate limits
-- **Equalizer Parameters**: Number of bands, adaptation rate, smoothing factor
-- **Safety Limiters**: Crest factor limits, RMS voltage limits
-- **Simulation Parameters**: Plant gain, noise level, simulation mode toggle
+This installs the Python bindings. A compatible NI-DAQmx driver, supported device,
+and configured channels are also required; pip does not install that driver.
 
-### **Controller Tab**
-- **Start/Stop Controls**: Simple button interface to control the vibration system
-- **Real-Time PSD Plot**: Shows measured vs target PSD with logarithmic Y-axis
-- **Control Metrics**: RMS acceleration, level fraction, saturation percentage, plant gain
-- **Equalizer Gains**: Live bar chart showing frequency-dependent gain adjustments
+## Run the controller
 
-### **Real-Time Data Tab**
-- **Channel RMS History**: Time-series plot of acceleration RMS for each channel
-- **PSD Analysis**: Averaged PSD from controller with target overlay
-- **Multi-Channel Support**: Displays data from multiple accelerometer channels
+```bash
+python app.py
+```
 
-## ⚙️ **Configuration**
+The application opens three tabs: **Configuration**, **Controller**, and
+**Real-Time Data**. Before starting a simulation, select **Enable Simulation
+Mode** and click **Apply Configuration**. Alternatively, set
+`SIMULATION_MODE = True` in `config.py` before launching.
 
-All parameters are centralized in `config.py` and can be modified through the GUI:
+The checked-in configuration selects **hardware mode**. If `nidaqmx` is absent,
+or hardware initialization fails, the controller falls back to simulation and
+prints the mode to the console. A simulated run is not a hardware measurement.
 
-### **Random Vibration Target PSD Profile**
+Choose **Random Vibration** or **Sine Sweep**, apply settings, then use **Start
+Controller** and **Stop Controller**. Stop before changing settings. GUI edits
+update the in-memory configuration for that session; they do not save `config.py`.
+DAQ channel names, accelerometer sensitivity, the random PSD profile, and the
+sine drive table are configured in `config.py`.
+
+### Random vibration
+
+The controller generates band-limited noise, shapes it through logarithmically
+spaced equalizer bands, estimates response PSD using Welch's method, and adjusts
+the overall level with PI control. It also estimates plant gain from measured
+acceleration versus commanded voltage. Equalizer adaptation is gated by level.
+
+The current default PSD points, in Hz and g²/Hz, are:
+
 ```python
 TARGET_PSD_POINTS = [
-    (20.0, 0.0025),     # 20 Hz: 2.5e-3 g²/Hz
-    (80.0, 0.01),       # 80 Hz: 1e-2 g²/Hz
-    (800.0, 0.01),      # 800 Hz: 1e-2 g²/Hz
-    (2000.0, 0.0025)    # 2000 Hz: 2.5e-3 g²/Hz
+    (100.0, 0.001),
+    (300.0, 0.004),
+    (350.0, 0.004),
+    (500.0, 0.001),
 ]
 ```
 
-### **System Parameters**
-```python
-FS = 51200.0                    # Sample rate [Hz]
-BUF_SECONDS = 5.0               # Buffer duration [s]
-BLOCK_SECONDS = 2.0             # Processing block duration [s]
-WELCH_NPERSEG = 2048            # Welch PSD segment length
-AO_VOLT_LIMIT = 2.0             # Maximum output voltage [V]
-```
+Log-log interpolation and integration give approximately **0.999 g RMS** over
+100–500 Hz. The level fraction scales acceleration amplitude, so a fraction of
+0.1 requests 0.01 times the target PSD. Actual output also depends on the minimum
+drive floor, limiters, and plant response; random mode enforces a 0.05 V RMS
+minimum command before limiting.
 
-### **Control Tuning**
-```python
-KP = 2.0                        # Proportional gain
-KI = 0.5                        # Integral gain
-INITIAL_LEVEL_FRACTION = 0.10   # Starting level (10% of target)
-MAX_LEVEL_FRACTION_RATE = 0.5   # Slew rate limit
-```
+### Sine sweep and calibration
 
-### **Safety Limits**
-```python
-MAX_CREST_FACTOR = 6.0          # Peak/RMS ratio limit
-MAX_RMS_VOLTS = 1.8             # RMS voltage limit
-```
+Select **Sine Sweep** in the main GUI. It uses logarithmically spaced frequency
+steps and a phase-continuous oscillator. Dwell time respects the configured
+octaves-per-minute rate, minimum dwell, and processing block duration. The first
+step has an additional initial settling dwell (3 seconds by default).
 
-### **Simulation Mode**
-```python
-SIMULATION_MODE = True          # Enable simulation (no hardware required)
-SIM_PLANT_GAIN = 4.0           # Plant gain [g/V]
-SIM_NOISE_LEVEL = 0.02         # Measurement noise [g RMS]
-```
+Amplitude is derived from `SINE_SWEEP_DRIVE_TABLE`, interpreted as peak volts
+required per 1 g-peak, multiplied by the target acceleration and level fraction.
+Measured acceleration is displayed and logged; it does not close an amplitude
+feedback loop. The drive table must match the actual shaker, fixture, and load.
+Displayed g-peak is estimated as sqrt(2) times block standard deviation, assuming
+a sinusoidal response; noise and harmonics affect this estimate. The plot and
+CSV summary retain the largest estimate during each frequency dwell.
 
-### **Data Logging**
-```python
-DATA_LOG_ENABLED = False       # Enable HDF5 + CSV logging
-DATA_LOG_DIR = "data_logs"     # Output directory for recorded runs
-```
+The calibration CLI iteratively adjusts voltage at each frequency to produce a
+target acceleration. For an explicit simulation example:
 
-When enabled, each run records raw AO/AI blocks to an HDF5 file and writes a
-lightweight CSV summary (random vibration: PSD of the last block; sine sweep:
-measured g-peak vs frequency).
-
-## 🔧 **Hardware Setup**
-
-### **Simulation Mode (Default)**
-- No hardware required
-- Realistic plant simulation with resonances and noise
-- Perfect for testing and development
-
-### **Hardware Mode**
-1. Install NI-DAQ drivers: `pip install nidaqmx`
-2. In the Configuration tab, uncheck "Enable Simulation Mode"
-3. Configure your DAQ device channels in `config.py`:
-   ```python
-   DEVICE_AI = "Dev1/ai0"       # Input channel
-   DEVICE_AO = "Dev1/ao0"       # Output channel
-   ACCEL_MV_PER_G = 100.0       # Accelerometer sensitivity [mV/g]
-   ```
-
-## 📊 **Advanced Features**
-
-### **Multi-Band Equalizer**
-- **12 frequency bands** with logarithmic spacing
-- **Adaptive gain adjustment** based on measured vs target PSD
-- **Smooth adaptation** to prevent oscillations
-- **Real-time visualization** of gain adjustments
-
-### **Intelligent Control**
-- **PI control** with anti-windup protection
-- **Plant gain estimation** for adaptive scaling
-- **Saturation detection** with automatic backoff
-- **Level fraction control** for smooth ramping
-
-### **Safety Systems**
-- **Crest factor limiting** with soft compression
-- **RMS voltage limiting** for thermal protection
-- **Hard voltage clipping** as final safety net
-- **NaN/inf detection** for numerical stability
-
-### **Professional Visualization**
-- **PyQtGraph-based plotting** for high performance
-- **Real-time updates** at 30+ FPS
-- **Logarithmic PSD scaling** for better visualization
-- **Fixed frequency ranges** (20-2000 Hz) for consistency
-
-## 🎮 **Usage Workflow**
-
-1. **Launch Application**: Run `python3 app.py`
-2. **Configure System**: Go to Configuration tab and adjust parameters
-3. **Apply Settings**: Click "Apply Configuration" button
-4. **Start Control**: Go to Controller tab and click "Start Controller"
-5. **Monitor Performance**: Watch real-time plots and metrics
-6. **Stop When Done**: Click "Stop Controller" to halt the system
-
-## 🛡️ **Safety Features**
-
-Multiple layers of protection ensure safe operation:
-1. **Software limits**: Crest factor and RMS limiting
-2. **Hardware limits**: Absolute voltage clipping
-3. **Adaptive control**: Automatic saturation backoff
-4. **Error handling**: NaN/inf detection and recovery
-5. **GUI feedback**: Real-time status and error messages
-
-## 📈 **Performance**
-
-The system demonstrates:
-- **Target achievement**: Reaches 90%+ of target PSD levels
-- **Stable control**: No oscillations or instability
-- **Realistic saturation**: 5-10% typical levels
-- **Fast adaptation**: Equalizer learns plant response quickly
-- **Professional monitoring**: Comprehensive real-time dashboard
-
-## 🔄 **Sine Sweep Testing**
-
-For sine sweep testing, use the dedicated `sine_sweep.py` module:
 ```bash
-python3 sine_sweep.py
+python record_1g_sine_sweep.py --simulation \
+    --frequencies 100 300 500 --target-g 1 \
+    --outfile 1g_sine_sweep_config.txt
 ```
 
-This provides specialized sine sweep functionality with configurable frequency ranges, sweep rates, and amplitude profiles.
+Use `--help` for frequency spacing, tolerances, iteration counts, and voltage
+limits. `--hardware` explicitly selects hardware and fails if it is unavailable.
+Copy the generated frequency/voltage pairs into `SINE_SWEEP_DRIVE_TABLE` after
+reviewing their provenance. The GUI table assumes a 1 g-peak calibration;
+normalize tables generated for another target before using them.
 
-## 🎯 **Production Ready**
+`sine_sweep.py` contains reusable generation/interpolation utilities and is not
+a standalone application.
 
-This system is designed for professional vibration testing with:
-- **Robust error handling** and recovery
-- **Professional GUI** with intuitive controls
-- **Comprehensive logging** and status reporting
-- **Hardware abstraction** for easy DAQ integration
-- **Modular architecture** for easy customization
+## Run the accelerometer monitor
 
-Perfect for research, development, and production vibration testing applications! 🎯✨
+Set `SIMULATION_MODE = True` in `monitor_config.py` for synthetic traces, then:
+
+```bash
+python accel_monitor.py
+```
+
+This separate application displays multichannel acceleration in g and PSD in
+g²/Hz, with an adjustable PSD window. Its default hardware configuration has
+one channel (`Dev1/ai0`) at 2,048 Hz, with 512-sample blocks. Add entries to
+`CHANNELS` in `monitor_config.py` for additional inputs; configure each channel's
+label, sensitivity in mV/g, IEPE excitation, and terminal configuration there.
+Use **Start** and **Stop** to control acquisition. Missing Python hardware bindings
+select simulation; hardware initialization errors are reported by the worker.
+
+## Current controller defaults
+
+| Setting | Value |
+|---|---|
+| Test mode | Random vibration |
+| Acquisition backend | Hardware (`SIMULATION_MODE = False`) |
+| Sample rate / processing block / buffer | 51,200 Hz / 1 s / 4 s |
+| Welch segment length | 4,096 samples (12.5 Hz bin spacing) |
+| Equalizer | 36 bands |
+| Initial random level fraction | 0.1 |
+| PI gains | Kp = 0.9, Ki = 0.06 |
+| AO absolute voltage clip | ±1.8 V |
+| RMS voltage limit / crest-factor limit | 1.4 V / 5 |
+| Sine sweep | 20–2,000 Hz, 3 g-peak, 1 octave/min, repeating |
+| Initial sine settling dwell | 3 s extra at the first step |
+| Logging | Enabled, under `data_logs/` |
+| Hardware AI / AO | `Dev1/ai0` / `Dev1/ao0` |
+| Sensitivity / IEPE excitation | 100 mV/g / 2.1 mA |
+
+The main controller currently acquires one hardware control accelerometer.
+Additional response channels are simulated; the standalone monitor supports
+multiple hardware inputs. AI/AO clock sharing is disabled by default.
+
+## Limiters and recorded data
+
+Voltage blocks pass through RMS limiting, crest-factor limiting, and then a
+separate absolute voltage clip in the controller. The limiter RMS definition is
+`sqrt(mean(x**2))`, including any DC component. Crest factor is
+`max(abs(x)) / RMS(x)`; empty and all-zero blocks use zero for both metrics.
+
+Crest limiting compresses individual peaks above a soft knee, then remeasures
+output RMS and adjusts the clipping threshold if necessary. It never increases
+sample magnitudes. If a sparse waveform cannot satisfy the ratio by attenuation,
+it returns a zero block: scaling a single impulse cannot change its crest factor.
+Invalid waveforms or limiter settings raise `ValueError`. Reported output RMS
+and crest factor describe the final waveform after both limiters, before the
+controller's separate absolute voltage clip. Peak compression can alter PSD and
+introduce harmonics; it does not guarantee acceleration tracking.
+
+Each logged GUI run creates a timestamped directory containing:
+
+- `data.h5`: AO voltage and AI acceleration blocks stored as float32, plus sample
+  rate and per-block timestamps, level fraction, and saturation fraction.
+- `preview_psd.csv`: random-run PSD of the last recorded block, per channel.
+- `sine_summary.csv`: sine-run frequency, measured g-peak, and target g-peak.
+
+CSV summaries are exported when the logger closes. They are previews, not a
+whole-run PSD qualification report. Logs and generated calibration tables are
+ignored by Git.
+
+## Checks and remaining limitations
+
+Install the test dependencies and run the numerical regression suite:
+
+```bash
+python -m pip install -r requirements-dev.txt
+python -m pytest -q
+python -m pip check
+```
+
+Tests cover measured output crest factor, sparse impulses, unchanged acceptable
+signals, extreme amplitudes, invalid inputs, RMS limiting including DC, and final
+combined-limiter statistics. They do not open DAQ tasks or operate a shaker.
+
+The PI controller currently has no anti-windup mechanism. Random mode reports
+saturation without automatic level backoff; sine mode has saturation backoff.
+Hardware control I/O uses unbounded waits, and stopping/closing the GUI has
+bounded thread waits; stop behavior still needs hardware validation. Simulation
+includes prescribed resonances, noise, delay, and nonlinearity, rather than a
+validated model of a particular shaker. Tracking accuracy, stability, and physical
+protection require separate evidence for the configured equipment and load.
+
+## Repository map
+
+| File | Responsibility |
+|---|---|
+| `app.py` | Controller GUI, acquisition worker, and run logger |
+| `config.py` | Controller, hardware, simulation, target, and sweep settings |
+| `rv_controller.py` | Random control, equalization, noise generation, and limiters |
+| `simulation.py` | Synthetic plant and mock DAQ |
+| `sine_sweep.py` | Sweep generators, oscillator, and drive-table interpolation |
+| `record_1g_sine_sweep.py` | Command-line drive calibration |
+| `accel_monitor.py` / `monitor_config.py` | Standalone multichannel monitor |
+| `tests/test_limiters.py` | Numerical limiter regressions |
+| `requirements*.txt` | Runtime, test, and optional hardware dependency pins |
+
+License: MIT; see `LICENSE`.
