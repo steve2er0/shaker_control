@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Mapping
 
+from app_paths import resolve_recording_directory
+
 NUMERIC_FIELDS = ('fs', 'block_seconds', 'buf_seconds', 'welch_nperseg',
     'ao_volt_limit', 'max_rms_volts', 'max_crest_factor', 'crest_soft_knee',
     'rms_limit_headroom', 'kp', 'ki', 'initial_level_fraction',
@@ -262,6 +264,11 @@ class RunSettings:
         for key in ('device_ai', 'device_ao', 'data_log_dir', 'calibration_source', 'preset_source'):
             if key in values and not isinstance(values[key], str):
                 raise ConfigurationError({key: 'Must be text.'})
+        if values.get('data_log_dir'):
+            try:
+                values['data_log_dir'] = str(resolve_recording_directory(values['data_log_dir']))
+            except (OSError, ValueError, RuntimeError) as error:
+                raise ConfigurationError({'data_log_dir': str(error)}) from None
         for key in ('eq_gain_limits', 'sim_resonances'):
             try:
                 if key == 'sim_resonances':

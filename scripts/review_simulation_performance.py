@@ -178,7 +178,7 @@ def main():
     qt.exec()
     result = {'method': 'Qt event loop, live plots, default-rate simulation, real HDF5 recording',
               'hardware_task_attempts': len(hardware_attempts), 'cases': cases, 'errors': errors}
-    (args.output / 'validation.json').write_text(json.dumps(result, indent=2) + '\n')
+    (args.output / 'validation.json').write_text(json.dumps(result, indent=2) + '\n', encoding='utf-8')
     return 1 if errors or hardware_attempts or not cases else 0
 
 

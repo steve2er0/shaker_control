@@ -1,0 +1,104 @@
+{
+  "scope": "Windows setup, paths and recording storage, Windows/macOS CI configuration",
+  "local_environment": {
+    "python": "3.13.13",
+    "os": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+    "architecture": "arm64",
+    "dependencies": {
+      "numpy": "2.2.6",
+      "scipy": "1.15.3",
+      "PySide6": "6.9.2",
+      "pyqtgraph": "0.13.7",
+      "h5py": "3.14.0",
+      "pytest": "8.4.2",
+      "nidaqmx": "1.2.0"
+    }
+  },
+  "tests": {
+    "python313": {
+      "tests": "147",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "22.169"
+    },
+    "legacy_python39": {
+      "tests": "147",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0",
+      "time": "19.344"
+    }
+  },
+  "simulation": {
+    "method": "Qt event loop, live plots, default-rate simulation, real HDF5 recording",
+    "hardware_task_attempts": 0,
+    "cases": [
+      {
+        "mode": "random",
+        "fs_hz": 51200,
+        "block_samples": 51200,
+        "channels": 4,
+        "blocks": 6,
+        "first_block_wall_s": 0.07914166618138552,
+        "median_block_interval_s": 1.0069325002841651,
+        "max_block_interval_s": 1.0174624999053776,
+        "median_mock_read_s": 0.008364437613636255,
+        "max_mock_read_s": 0.008636374957859516,
+        "max_gui_heartbeat_gap_s": 0.053964583203196526,
+        "stop_to_finished_s": 0.023146208841353655,
+        "outcome": "stopped",
+        "recording_checked": true
+      },
+      {
+        "mode": "sine_sweep",
+        "fs_hz": 51200,
+        "block_samples": 51200,
+        "channels": 4,
+        "blocks": 6,
+        "first_block_wall_s": 0.047476709354668856,
+        "median_block_interval_s": 1.001321041956544,
+        "max_block_interval_s": 1.006875999737531,
+        "median_mock_read_s": 0.011444478994235396,
+        "max_mock_read_s": 0.012369875330477953,
+        "max_gui_heartbeat_gap_s": 0.0566107090562582,
+        "stop_to_finished_s": 0.02386137517169118,
+        "outcome": "stopped",
+        "recording_checked": true
+      }
+    ],
+    "errors": []
+  },
+  "checks": {
+    "dependency_consistency": "passed before and after optional NI bindings",
+    "simulation_without_nidaqmx": "passed in fresh environment",
+    "optional_nidaqmx_import_without_device": "passed",
+    "windows_python313_binary_dependency_resolution": "passed with uv for x86_64-pc-windows-msvc; not Windows execution",
+    "workflow_lint": "passed with actionlint 1.7.12",
+    "powershell_syntax": "both scripts parsed with PowerShell 7.6.9 on macOS; Windows PowerShell 5.1 execution pending",
+    "git_diff_check": "passed"
+  },
+  "pending": [
+    "First Windows/macOS GitHub Actions run after publication",
+    "Native Windows 11 desktop and launcher acceptance",
+    "NI driver/device and physical hardware qualification",
+    "Executable packaging"
+  ],
+  "source_sha256": {
+    "app_paths.py": "5f3398648973d7a67855575d1afd95d5f5d3c61c0e5ca026fa06c720d1f17874",
+    "app.py": "39208b46dcf21fbddf1caa62139505ee8924c2cfcb9d3645064110e31c102911",
+    "run_settings.py": "a19ecbfd5ef0ec88158b0b3be7a19b1616fa6bdf16081ea5ed9013e2317accd4",
+    "config.py": "3f3842e44975b88a9ac35edc3021b8b739da9f094a456b42e971d42665f24df1",
+    "workspace_shell.py": "ffc6c1e6d643a0b9d3f1e641f178ab26628cba6938bd0dd2e52dbd2265fab8f3",
+    "workspace_ui.py": "6c859f86c120d3055bd14f7d00b22ef06803f1eba5f9b502dcb190f17ec4f88f",
+    "requirements.txt": "a14a6aa0e72e7d30f93d61237529833ce417bf3429872c04aa9b935756a7ed40",
+    ".github/workflows/desktop.yml": "9c8ed7d94fe5b829f678722cedd1f9e7ef04bb7c299260f8308499068f428985",
+    "scripts/setup-windows.ps1": "408f58d1ec9b2e310dfe8fbc67aacaa7692cae95e8098fc1d63b919bd61cdc36",
+    "scripts/start-windows.ps1": "cd2472f907a594e7585f9063ffeff5b0fac63ffa862f4ffcb2e0b6b65ef37619",
+    "setup-windows.cmd": "483bdf3bf65b53e64d342d737afdadd82123d80e64fb375401389b9085db7a43",
+    "start-controller.cmd": "3978589775e368f0e7a5d244f81375705227b640b400741dbc2505b4843b145c",
+    "start-monitor.cmd": "e3f09ce40fa27472471ea37cabf80c9a30bfb86cef53eb1abe0aa931081ac64c",
+    ".gitattributes": "a088cd71f733cc49b7adad439c41c8a5a73a7d6453b2a630db5fd580b7cc5c8e",
+    "tests/test_app_paths.py": "06e7aaf97182998d1e04e653f4ce9a1dfdd833024192bd456dbb773debcbd5d3"
+  }
+}

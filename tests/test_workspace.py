@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 import numpy as np
 import h5py
 import pytest
@@ -168,7 +169,7 @@ def test_live_recording_summary_is_visible_and_saved(window,tmp_path):
     window.stop_controller()
     wait_until(lambda: not window.busy)
     report = window.last_report
-    directory = tmp_path / report['log_dir'].split('/')[-1]
+    directory = Path(report['log_dir'])
     assert (directory/'run-summary.json').is_file()
     assert (directory/'settings.json').is_file()
     assert 'Simulation' in window.results_tab.summary_text.toPlainText()

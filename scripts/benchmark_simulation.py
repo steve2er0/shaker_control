@@ -74,7 +74,7 @@ def main():
                       max_abs_difference_g=float(np.max(np.abs(actual - expected))),
                       parity_rtol=1e-10, parity_atol_g=1e-11)
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(result, indent=2) + '\n')
+    args.output.write_text(json.dumps(result, indent=2) + '\n', encoding='utf-8')
     print(json.dumps(result, indent=2))
     return 0
 

@@ -42,6 +42,7 @@ except ImportError:
 
 # Import our existing modules
 import config
+from app_paths import resolve_recording_directory
 from run_settings import RunSettings
 from rv_controller import MultiBandEqualizer, RandomVibrationController, create_bandpass_filter, make_bandlimited_noise, apply_safety_limiters
 from simulation import create_simulation_system
@@ -70,12 +71,12 @@ class DataLogger:
         if h5py is None:
             raise RuntimeError('Recording requested but h5py is unavailable')
 
-        base_dir = Path(getattr(shared_config, 'data_log_dir', 'data_logs')).expanduser()
+        base_dir = resolve_recording_directory(getattr(shared_config, 'data_log_dir', None))
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f') + '_' + uuid.uuid4().hex[:6]
         self.run_dir = base_dir / f"{timestamp}_{mode}"
         self.run_dir.mkdir(parents=True, exist_ok=False)
 
-        (self.run_dir / 'settings.json').write_text(json.dumps(shared_config.as_dict(), indent=2, allow_nan=False) + '\n')
+        (self.run_dir / 'settings.json').write_text(json.dumps(shared_config.as_dict(), indent=2, allow_nan=False) + '\n', encoding='utf-8')
         self.h5 = h5py.File(self.run_dir / 'data.h5', 'w')
         self.h5.attrs['schema_version'] = 2
         self.h5.attrs['backend'] = shared_config.backend
@@ -202,7 +203,7 @@ class DataLogger:
             psd_channels.append(psd)
 
         preview_path = self.run_dir / 'preview_psd.csv'
-        with preview_path.open('w', newline='') as csv_file:
+        with preview_path.open('w', newline='', encoding='utf-8') as csv_file:
             writer = csv.writer(csv_file)
             header = ['frequency_hz'] + [f'ch{idx}_psd' for idx in range(self.last_ai_block.shape[0])]
             writer.writerow(header)
@@ -214,7 +215,7 @@ class DataLogger:
         if not self.sine_freqs:
             return
         summary_path = self.run_dir / 'sine_summary.csv'
-        with summary_path.open('w', newline='') as csv_file:
+        with summary_path.open('w', newline='', encoding='utf-8') as csv_file:
             writer = csv.writer(csv_file)
             writer.writerow(['frequency_hz', 'g_peak_measured', 'g_peak_target'])
             for freq, meas, target in zip(self.sine_freqs, self.sine_peak_meas, self.sine_peak_target):
@@ -291,7 +292,7 @@ class SharedConfig(QObject):
 
         # Data logging
         self.data_log_enabled = bool(getattr(config, 'DATA_LOG_ENABLED', False))
-        self.data_log_dir = getattr(config, 'DATA_LOG_DIR', 'data_logs')
+        self.data_log_dir = str(resolve_recording_directory(getattr(config, 'DATA_LOG_DIR', None)))
 
         # Control parameters
         self.initial_level_fraction = config.INITIAL_LEVEL_FRACTION
@@ -835,7 +836,7 @@ class ControllerWorker(QThread):
                 'log_dir': str(data_logger.run_dir) if data_logger and data_logger.enabled else None}
             if report['log_dir']:
                 try:
-                    (Path(report['log_dir']) / 'run-summary.json').write_text(json.dumps(report, indent=2, allow_nan=False) + '\n')
+                    (Path(report['log_dir']) / 'run-summary.json').write_text(json.dumps(report, indent=2, allow_nan=False) + '\n', encoding='utf-8')
                 except Exception as error:
                     report['outcome'] = self.terminal_state = 'fault'
                     report['error'] = self.error_message = f'{self.error_message} Run summary could not be saved: {error}'.strip()

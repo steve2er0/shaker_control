@@ -5,6 +5,8 @@ recording remain in their existing modules; no device work happens here.
 """
 from __future__ import annotations
 
+from app_paths import display_path_name
+
 from PySide6.QtCore import Qt, QSize, Signal, QTimer, QByteArray, QSignalBlocker, QTime
 from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
@@ -741,7 +743,7 @@ class FloatingWorkspaceMixin:
 
     def _sync_shell_state(self):
         self.setup_name.setText('Draft setup · apply before starting' if self.config_tab.dirty else
-                                (self.settings.preset_source.rsplit('/', 1)[-1] or 'Session setup'))
+                                (display_path_name(self.settings.preset_source) or 'Session setup'))
         self.setup_name.setToolTip(self.settings.preset_source or 'Launch defaults from config.py; session edits do not rewrite that file.')
         full_summary = self.setup_summary.text()
         self.setup_summary.setToolTip(full_summary)
@@ -756,7 +758,7 @@ class FloatingWorkspaceMixin:
         color = workspace_colors()['red' if self.fault_message else 'green' if self.run_state == 'running' else 'ink']
         self.status_label.setStyleSheet(f'color: {color};')
         if self.active_log_dir:
-            name = self.active_log_dir.rstrip('/').rsplit('/', 1)[-1]
+            name = display_path_name(self.active_log_dir)
             self.recording_status.setText(('Recording · ' if self.busy else 'Saved · ') + name)
             self.recording_status.setToolTip(self.active_log_dir)
         else:

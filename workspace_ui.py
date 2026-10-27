@@ -453,7 +453,7 @@ class SettingsPanel(QWidget):
         if not filename:
             return
         try:
-            data = json.loads(Path(filename).read_text())
+            data = json.loads(Path(filename).read_text(encoding='utf-8-sig'))
             if not isinstance(data, dict) or data.get('schema_version', 1) != 1:
                 raise ValueError('Use a supported version 1 setup object.')
             values = self.shared_config.as_dict()
@@ -476,7 +476,7 @@ class SettingsPanel(QWidget):
         filename, _ = QFileDialog.getSaveFileName(self, 'Save setup preset', 'test-setup.json', 'JSON settings (*.json)')
         if filename:
             try:
-                Path(filename).write_text(json.dumps({'schema_version':1, 'settings': self.shared_config.as_dict()}, indent=2, allow_nan=False) + '\n')
+                Path(filename).write_text(json.dumps({'schema_version':1, 'settings': self.shared_config.as_dict()}, indent=2, allow_nan=False) + '\n', encoding='utf-8')
                 self.validation_label.setText(f'Preset saved: {filename}')
             except OSError as error:
                 self.validation_label.setText(f'Preset could not be saved: {error}')

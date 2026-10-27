@@ -1,0 +1,3 @@
+# Keep Windows entry points native when checked out on either platform.
+*.cmd text eol=crlf
+*.ps1 text eol=crlf

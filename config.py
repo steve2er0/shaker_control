@@ -87,7 +87,9 @@ SINE_SWEEP_DRIVE_TABLE = [     # Optional (frequency [Hz], V peak per 1 g peak)
 
 # ============= DATA LOGGING =============
 DATA_LOG_ENABLED = True
-DATA_LOG_DIR = "data_logs"
+# None uses the OS Documents folder / ShakerControl / Runs. Explicit relative
+# folders (for example "data_logs") are resolved from this checkout, not the cwd.
+DATA_LOG_DIR = None
 
 # ============= SIMULATION MODE =============
 SIMULATION_MODE = False          # Set to False for real hardware

@@ -9,15 +9,55 @@ establish shaker performance, hardware stop behavior, or production qualificatio
 
 ## Install
 
-Use a virtual environment. The pinned setup was validated with Python 3.9.6 on
-macOS ARM64. Use Python 3.9 to reproduce that setup; newer interpreter/platform
-combinations may require updated dependency pins and their own checks.
+The supported setup targets **64-bit CPython 3.13**, **Windows 11 x64**, and
+**macOS**. Runtime dependencies are pinned in `requirements.txt`. Use a separate
+environment for this baseline; an existing Python 3.9 `.venv` can stay in place,
+but the updated requirements must not be installed into it. Virtual environments
+are local to one OS and computer; recreate them after cloning on another machine.
+
+### Windows 11 x64
+
+Install [64-bit Python 3.13](https://www.python.org/downloads/windows/) with the
+Python launcher, then clone or extract this repository into a writable folder.
+Double-click **setup-windows.cmd**. It creates `.venv-py313`, installs prebuilt
+dependencies, and checks their consistency. No activation or administrator
+terminal is needed. Then open:
+
+- **start-controller.cmd** for Shaker Control.
+- **start-monitor.cmd** for the accelerometer monitor.
+
+The launchers find the checkout independently of the current working directory.
+They keep console diagnostics and write a log under
+`%LOCALAPPDATA%\ShakerControl\Logs`. A failed launch leaves the console open.
+Setup pauses so its result remains visible.
+
+Optional NI bindings and test dependencies can be installed from Command Prompt:
+
+```bat
+setup-windows.cmd -Hardware
+setup-windows.cmd -Development
+```
+
+These options can be combined. The PowerShell scripts in `scripts/` also work
+directly; `setup-windows.ps1 -PythonExecutable "C:\path\to\python.exe"` selects a
+specific 64-bit Python 3.13 interpreter. The `.cmd` entry points set script
+execution policy only for their child PowerShell process.
+
+### macOS
+
+Install Python 3.13, then create the new environment without changing an existing
+`.venv`:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
+python3.13 -m venv .venv-py313
+source .venv-py313/bin/activate
 python -m pip install -r requirements.txt
+python -m pip check
 ```
+
+The remaining `python` commands assume this environment is active. In Windows
+Command Prompt, run `.venv-py313\Scripts\activate.bat`, or replace `python` with
+`.venv-py313\Scripts\python.exe`. The Windows launchers work without activation.
 
 `requirements.txt` installs the GUI, numerical tools, and HDF5 logging support.
 Simulation does not require `nidaqmx`. For hardware support:
@@ -28,6 +68,7 @@ python -m pip install -r requirements-hardware.txt
 
 This installs the Python bindings. A compatible NI-DAQmx driver, supported device,
 and configured channels are also required; pip does not install that driver.
+Windows hardware operation still requires validation with the actual device.
 
 ## Run the controller
 
@@ -204,7 +245,7 @@ record run files.
 | RMS voltage limit / crest-factor limit | 1.4 V / 5 |
 | Sine sweep | 20–2,000 Hz, 3 g-peak, 1 octave/min, repeating |
 | Initial sine settling dwell | 3 s extra at the first step |
-| Logging | Enabled, under `data_logs/` |
+| Logging | Enabled, under the OS Documents folder / `ShakerControl/Runs` |
 | Hardware AI / AO | `Dev1/ai0` / `Dev1/ao0` |
 | Sensitivity / IEPE excitation | 100 mV/g / 2.1 mA |
 
@@ -257,6 +298,21 @@ CSV summaries are previews, not a
 whole-run PSD qualification report. Logs and generated calibration tables are
 ignored by Git.
 
+The default recording root follows the system's Documents location, including
+Windows folder redirection, with `ShakerControl/Runs` appended. The effective
+absolute path is captured in presets, settings and run reports. No recording
+directory is created until a recording starts. Change the folder in setup or set
+`DATA_LOG_DIR` in `config.py` to an explicit path; `None` selects the system default.
+Relative paths resolve against the checkout, independently of the launch
+directory. Setting `DATA_LOG_DIR = "data_logs"` retains the earlier checkout-local
+destination. Existing recordings are not moved or deleted.
+
+Recording destinations in presets belong to the computer that saved them. When
+moving a preset between computers, select an appropriate local recording folder.
+Foreign Windows paths on macOS and incomplete drive paths on Windows are rejected
+before a run. Imported presets accept UTF-8 with or without a byte-order mark;
+new JSON and CSV exports use UTF-8. NI channel names retain their `/` syntax.
+
 ## Checks and remaining limitations
 
 Install the test dependencies and run the regression suite:
@@ -273,6 +329,15 @@ cleanup, plot resets and equalizer legends, exact sine endpoints, recording
 metadata, and monitor PSD retention. Qt workflow tests run offscreen with real
 simulation workers and prohibit opening real NI-DAQ tasks. No extra Qt test
 plugin is required beyond the pinned PySide6 and pytest dependencies.
+
+The [desktop compatibility workflow](.github/workflows/desktop.yml) runs on push,
+pull requests and manual dispatch with Python 3.13 on Windows and macOS. It checks
+the Windows setup/launcher scripts, the regression suite, default-rate simulation
+with actual HDF5 recording, and optional NI binding installation/import. Test
+reports, timing JSON and screenshots are retained as workflow artifacts. Hosted
+runner timings are recorded without enforcing desktop timing budgets. The Windows
+runner is a server image; actual Windows 11 display scaling and hardware behavior
+still need the [desktop acceptance checks](docs/windows-compatibility.md).
 
 The PI controller currently has no anti-windup mechanism. Random mode reports
 saturation without automatic level backoff; sine mode has saturation backoff.
@@ -323,6 +388,9 @@ block cadence. Response tracking/calibration limitations remain unchanged.
 | `workspace_shell.py` | Floating ribbon/browser/inspector layout, navigation, icons, and appearance |
 | `run_settings.py` | Immutable setup capture, validation, and target summaries |
 | `config.py` | Controller, hardware, simulation, target, and sweep settings |
+| `app_paths.py` | System recording defaults, absolute destinations and portable path labels |
+| `setup-windows.cmd` / `start-*.cmd` | Windows setup and desktop launchers |
+| `.github/workflows/desktop.yml` | Windows/macOS regression and simulation CI |
 | `rv_controller.py` | Random control, equalization, noise generation, and limiters |
 | `simulation.py` | Synthetic plant and mock DAQ |
 | `sine_sweep.py` | Sweep generators, oscillator, and drive-table interpolation |

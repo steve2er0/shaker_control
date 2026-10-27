@@ -1,0 +1,77 @@
+name: Desktop compatibility
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  desktop:
+    name: Python 3.13 / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONUTF8: '1'
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+          architecture: ${{ runner.arch == 'ARM64' && 'arm64' || 'x64' }}
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: Install using the Windows setup script
+        if: runner.os == 'Windows'
+        run: |
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./scripts/setup-windows.ps1 -Development -PythonExecutable (Get-Command python).Source
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          (Join-Path $PWD '.venv-py313/Scripts') | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Check Windows launchers from another working directory
+        if: runner.os == 'Windows'
+        run: |
+          $Launcher = (Resolve-Path ./scripts/start-windows.ps1).Path
+          Push-Location $env:RUNNER_TEMP
+          try {
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Launcher -CheckOnly
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Launcher -Monitor -CheckOnly
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } finally { Pop-Location }
+      - name: Install macOS dependencies
+        if: runner.os == 'macOS'
+        run: |
+          python -m pip install --only-binary=:all: -r requirements-dev.txt
+      - name: Verify dependencies and simulation-only installation
+        run: |
+          python -m pip check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -c "import platform, app; print(platform.platform(), platform.machine()); assert not app.NIDAQMX_AVAILABLE"
+      - name: Regression suite
+        run: python -m pytest -q --junitxml=output/ci/tests.xml
+      - name: Default-rate simulation and recording smoke test
+        run: python scripts/review_simulation_performance.py --blocks 3 --output output/ci/simulation
+      - name: Install and import optional hardware bindings without a device
+        run: |
+          python -m pip install --only-binary=:all: -r requirements-hardware.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pip check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -c "import app, accel_monitor; assert app.NIDAQMX_AVAILABLE and accel_monitor.nidaqmx is not None"
+      - name: Retain test results, timings and screenshots
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: desktop-${{ matrix.os }}
+          path: output/ci/
+          if-no-files-found: warn
