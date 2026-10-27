@@ -25,7 +25,8 @@ from PySide6.QtWidgets import (
 from scipy.signal import welch
 
 import monitor_config as cfg
-from workspace_ui import configure_plot, COLORS
+from workspace_ui import configure_plot, create_plot, COLORS
+from workspace_shell import workspace_colors
 
 try:  # Optional hardware support
     import nidaqmx
@@ -539,10 +540,10 @@ class MonitorWindow(QMainWindow):
         layout.addWidget(self.fault_label)
         self.acquisition_label = QLabel()
         layout.addWidget(self.acquisition_label)
-        self._time_plot = pg.PlotWidget(title='Acquired acceleration')
+        self._time_plot = create_plot(title='Acquired acceleration')
         self._time_plot.setLabel('left','Acceleration',units='g')
         self._time_plot.setLabel('bottom','Time relative to latest sample',units='s')
-        self._psd_plot = pg.PlotWidget(title='Acceleration PSD')
+        self._psd_plot = create_plot(title='Acceleration PSD')
         self._psd_plot.setLabel('left','PSD',units='g²/Hz')
         self._psd_plot.setLabel('bottom','Frequency',units='Hz')
         self._psd_plot.setLogMode(y=True)
@@ -554,7 +555,7 @@ class MonitorWindow(QMainWindow):
                 self._psd_plot.setYRange(math.log10(low),math.log10(high))
         for plot in (self._time_plot,self._psd_plot):
             configure_plot(plot)
-            plot.addLegend(brush=pg.mkBrush(QApplication.palette().base().color()))
+            plot.addLegend(brush=pg.mkBrush(workspace_colors()['paper']))
             layout.addWidget(plot,1)
         analysis = QHBoxLayout()
         analysis.addWidget(QLabel('PSD segment duration'))

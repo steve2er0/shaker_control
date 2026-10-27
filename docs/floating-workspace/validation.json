@@ -1,0 +1,66 @@
+{
+  "method": "Offscreen Qt with real simulation workers and real HDF5 recording",
+  "hardware_task_attempts": 0,
+  "captures": [
+    "01-ready.png",
+    "02-random-running.png",
+    "03-target-inspector.png",
+    "04-run-results.png",
+    "05-sine-complete.png",
+    "06-hardware-fault.png",
+    "07-compact-fault.png",
+    "08-dark.png"
+  ],
+  "recordings": [
+    {
+      "mode": "random",
+      "blocks": 3,
+      "outcome": "stopped"
+    },
+    {
+      "mode": "sine_sweep",
+      "blocks": 81,
+      "outcome": "complete"
+    }
+  ],
+  "source_sha256": {
+    "workspace_ui.py": "65075d9f839c9646f68c47fb302bd80a07dedd45a58b5398cdc55339c951583f",
+    "workspace_shell.py": "f4cbd62d8820fed85647c29fbcda384d90dc8cf0ed0114b7f608c9e24a83aea7",
+    "app.py": "35dcef78c817333718852eaddd07e98d7614414b1013a4ba05b41bf70f0f2635",
+    "config.py": "41a422b02e241ed8b6cf6a97ceeec8baa9ecb4c90fcf2f3501675538be107448",
+    "rv_controller.py": "b32a76fa95047626229cbddabd076891ee38c007e81e839ab43aa858cf5e9f92",
+    "simulation.py": "79db2b2367c6f2b0d339a721be04380f967d4f607b32ff445574aef0438c9b5b",
+    "sine_sweep.py": "26b34db9c6dbe3165ddfde5dec61c962738d32e95e771660bbec32b5c0bd6eb9",
+    "run_settings.py": "c5e8e93a26ec55b3fd784be8b7a547f6b19fc43c08b15969d9ca037f5a0650ef",
+    "accel_monitor.py": "d6788b45c703b1ff2054a5030aa203010986031dee34976d314b82b83bf8d887",
+    "tests/test_floating_workspace.py": "0ff3919ac16af179ff20e3dd218c4d06f9217050fd72759ff777e026f9c5719e",
+    "README.md": "c214d66ef785f0f88852968b55e15be64a0629c238b9dc4b9880859abd12eeac"
+  },
+  "limitations": [
+    "No real NI-DAQ tasks opened",
+    "No hardware tracking or stop-latency validation",
+    "Random review uses 8 kHz and 100 ms blocks; sine uses 8 kHz, 50 ms blocks and accelerated nonrepeating sweep settings; launch defaults are unchanged",
+    "A preliminary 51.2 kHz simulation produced one recorded block in about 39.5 s including stop cleanup; real-time performance at launch defaults was not established"
+  ],
+  "regression": {
+    "tests": "110",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0",
+    "time": "17.727",
+    "command": ".venv/bin/python -B -m pytest -q -W error --tb=short -o faulthandler_timeout=25 --junitxml=output/floating-workspace/regression.xml"
+  },
+  "checks": {
+    "git_diff_check": "passed",
+    "pip_check": "No broken requirements found",
+    "native_macos": "Final native ready view and target-inspector navigation inspected; application left open without starting acquisition"
+  },
+  "engine_sources_unchanged_from_head": [
+    "app.py",
+    "config.py",
+    "rv_controller.py",
+    "simulation.py",
+    "sine_sweep.py",
+    "run_settings.py"
+  ]
+}

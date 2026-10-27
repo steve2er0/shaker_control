@@ -3,36 +3,60 @@ from __future__ import annotations
 
 import json
 import math
+from html import escape
 from collections import deque
 from pathlib import Path
 
 import numpy as np
 import pyqtgraph as pg
 from scipy.signal import welch
-from PySide6.QtCore import Qt, Signal, QUrl, QSignalBlocker
+from PySide6.QtCore import Qt, Signal, QUrl, QSignalBlocker, QTimer
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QWidget, QMainWindow, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLabel, QPushButton, QComboBox, QDoubleSpinBox, QSpinBox, QCheckBox,
-    QLineEdit, QPlainTextEdit, QScrollArea, QToolButton, QDockWidget,
+    QLineEdit, QPlainTextEdit, QScrollArea, QToolButton,
     QStackedWidget, QTabWidget, QFileDialog, QListWidget, QApplication,
 )
 from run_settings import RunSettings, ConfigurationError, validate_settings, parse_points, format_points
+from workspace_shell import (
+    FloatingWorkspaceMixin, workspace_colors,
+)
 
 
 COLORS = ['#287bb5', '#9264ad', '#298a6b', '#b97327', '#bd5673', '#577b85']
 BUSY_STATES = {'starting', 'running', 'stopping'}
 
 
+class ReadableAxisItem(pg.AxisItem):
+    def logTickStrings(self, values, scale, spacing):
+        labels = super().logTickStrings(values, scale, spacing)
+        mantissas = 10 ** np.mod(np.asarray(values, dtype=float), 1)
+        keep = np.any(np.isclose(mantissas[:, None], [1, 2, 5, 10]), axis=1)
+        # Retain the standard narrow-range labels when filtering would leave
+        # too little scale information; otherwise use familiar 1, 2, 5 ticks.
+        if np.count_nonzero(keep) >= 2:
+            return [label if visible else '' for label, visible in zip(labels, keep)]
+        return labels
+
+
+def create_plot(**kwargs):
+    kwargs.setdefault('axisItems', {'left': ReadableAxisItem(orientation='left')})
+    return pg.PlotWidget(**kwargs)
+
+
 def configure_plot(widget):
-    palette = QApplication.palette()
-    text = palette.text().color()
-    widget.setBackground(palette.base().color())
+    colors = workspace_colors()
+    text = colors['muted']
+    widget.setBackground(colors['paper'])
     for name in ('left', 'bottom'):
         axis = widget.getAxis(name)
         axis.setPen(text)
         axis.setTextPen(text)
         axis.enableAutoSIPrefix(False)
+        if name == 'left':
+            # Minor logarithmic labels can overlap across a wide PSD range.
+            axis.setStyle(maxTextLevel=0)
     widget.showGrid(x=True, y=True, alpha=0.15)
 
 
@@ -59,6 +83,8 @@ def frequency_ticks(plot, low, high):
 class SettingsPanel(QWidget):
     applied = Signal(object)
     dirty_changed = Signal(bool)
+    discarded = Signal()
+    context_changed = Signal(str)
 
     def __init__(self, shared_config):
         super().__init__()
@@ -67,10 +93,16 @@ class SettingsPanel(QWidget):
         self.locked = False
         self.dirty = False
         self.validation_errors = {}
+        self.context = 'all'
+        self.field_sections = {}
         self.fields, self.error_labels, self.sections = {}, {}, {}
         self._edit_widgets = []
         outer = QVBoxLayout(self)
         outer.setContentsMargins(12, 12, 12, 12)
+        self.context_summary = QLabel()
+        self.context_summary.setObjectName('mutedText')
+        self.context_summary.setWordWrap(True)
+        outer.addWidget(self.context_summary)
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         content = QWidget()
@@ -96,8 +128,8 @@ class SettingsPanel(QWidget):
         self._spin('sine_max_level_rate', 'Ramp rate limit', 'sine', 0, 500, ' %/s', 1)
         self._spin('sine_initial_settle', 'Initial settling', 'sine', 0, 30, ' s')
         self._check('sine_repeat', 'Repeat sweep', 'sine')
-        self._text('calibration_source', 'Calibration source', 'sine')
         self._section('drive', 'Sine drive table · V peak per 1 g peak')
+        self._text('calibration_source', 'Calibration source', 'drive')
         self._text('sine_drive_table', 'Frequency, V peak pairs', 'drive', multiline=True)
         self._spin('sine_default_vpk', 'Default drive', 'drive', 0, 10, ' V peak/g')
         self._spin('sine_drive_scale', 'Drive scale', 'drive', 0, 100, ' ×')
@@ -148,9 +180,15 @@ class SettingsPanel(QWidget):
         self.validation_label.setWordWrap(True)
         outer.addWidget(self.validation_label)
         self.apply_button = QPushButton('Apply setup')
+        self.apply_button.setObjectName('applyButton')
         self.apply_button.setDefault(True)
         self.apply_button.clicked.connect(self.apply_config)
-        outer.addWidget(self.apply_button)
+        apply_row = QHBoxLayout()
+        apply_row.addWidget(self.apply_button, 1)
+        self.discard_button = QPushButton('Discard draft')
+        self.discard_button.clicked.connect(self.discard_changes)
+        apply_row.addWidget(self.discard_button)
+        outer.addLayout(apply_row)
         actions = QHBoxLayout()
         self.load_button, self.save_button = QPushButton('Load preset…'), QPushButton('Save preset…')
         self.load_button.clicked.connect(self.load_preset)
@@ -158,6 +196,10 @@ class SettingsPanel(QWidget):
         actions.addWidget(self.load_button)
         actions.addWidget(self.save_button)
         outer.addLayout(actions)
+        # Preset file actions live in the ribbon. Retain these public widgets
+        # for callers of the standalone settings editor without duplicating UI.
+        self.load_button.hide()
+        self.save_button.hide()
         # Backend and test selection live in the always-visible run bar.
         self.test_mode = shared_config.test_mode
         self.simulation_mode_check = QCheckBox()
@@ -201,6 +243,7 @@ class SettingsPanel(QWidget):
         layout.addWidget(error)
         self.sections[section][2].addRow(label, container)
         self.fields[key], self.error_labels[key] = widget, error
+        self.field_sections[key] = section
         widget.setAccessibleName(label or widget.text())
         self._edit_widgets.append(widget)
         return widget
@@ -280,13 +323,43 @@ class SettingsPanel(QWidget):
 
     def _update_sections(self):
         sine = self.test_mode == 'sine_sweep'
-        for key in ('target', 'control', 'equalizer'):
-            self.sections[key][0].setVisible(not sine)
-        for key in ('sine', 'drive'):
-            self.sections[key][0].setVisible(sine)
-        self.sections['hardware'][0].setVisible(not self.simulation_mode_check.isChecked())
-        self.sections['simulation'][0].setVisible(self.simulation_mode_check.isChecked())
+        contexts = {
+            'target': {'target', 'sine'}, 'calibration': {'drive'},
+            'limits': {'limits', 'control'}, 'equalizer': {'equalizer'},
+            'acquisition': {'acquisition'}, 'channel': {'hardware', 'simulation'},
+            'simulation': {'simulation'}, 'recording': {'recording'},
+        }
+        selected = contexts.get(self.context, set(self.sections))
+        for key, (wrapper, toggle, form, body) in self.sections.items():
+            applicable = not ((key in ('target', 'control', 'equalizer') and sine)
+                             or (key == 'sine' and not sine)
+                             or (key == 'hardware' and self.simulation_mode_check.isChecked())
+                             or (key == 'simulation' and not self.simulation_mode_check.isChecked()))
+            # A drive table can be reviewed before selecting sine mode.
+            if key == 'drive' and self.context == 'all' and not sine:
+                applicable = False
+            wrapper.setVisible(applicable and key in selected)
         self.fields['sine_g_level'].setSuffix(' g RMS' if self.sine_unit_combo.currentIndex() else ' g peak')
+        accepted = self.shared_config.snapshot()
+        self.context_summary.setText(f'Applied setup · {accepted.target_summary}')
+
+    def set_context(self, context):
+        """Switch the inspector without replacing widgets or losing a draft."""
+        self.context = context
+        self._update_sections()
+        if context != 'all':
+            for wrapper, toggle, form, body in self.sections.values():
+                if not wrapper.isHidden():
+                    toggle.setChecked(True)
+        self.scroll_area.verticalScrollBar().setValue(0)
+        self.context_changed.emit(context)
+
+    def discard_changes(self):
+        if self.locked:
+            return
+        self.load_values()
+        self.show_errors({})
+        self.discarded.emit()
 
     def _update_resolution(self):
         fs = self.fields['fs'].value()
@@ -330,6 +403,9 @@ class SettingsPanel(QWidget):
 
     def show_errors(self, errors):
         self.validation_errors = dict(errors)
+        if any(self.sections[self.field_sections[key]][0].isHidden()
+               for key in errors if key in self.field_sections):
+            self.set_context('all')
         for key, label in self.error_labels.items():
             label.setText(errors.get(key, ''))
             label.setVisible(key in errors)
@@ -366,6 +442,7 @@ class SettingsPanel(QWidget):
         self.apply_button.setEnabled(not locked)
         self.load_button.setEnabled(not locked)
         self.save_button.setEnabled(not locked)
+        self.discard_button.setEnabled(not locked and self.dirty)
         if locked or not self.validation_errors:
             self.validation_label.setText('Run settings are locked.' if locked else ('Draft changes · apply before starting.' if self.dirty else 'Setup applied · ready to start.'))
 
@@ -413,26 +490,29 @@ class RunView(QWidget):
         values = QHBoxLayout()
         self.value_labels = {}
         self.value_titles = {}
-        for key, title in [('accel','Band acceleration'),('level','Ramp level'),('clip','AO clipping'),('frequency','Frequency')]:
+        for key, title in [('accel','Band acceleration'),('target','Full target'),('level','Ramp level'),('clip','AO clipping'),('frequency','Frequency')]:
             box = QWidget()
             column = QVBoxLayout(box)
             column.setContentsMargins(0, 0, 0, 0)
             heading, value = QLabel(title), QLabel('—')
-            value.setStyleSheet('font-size: 20px; font-weight: 500;')
+            heading.setObjectName('metricTitle')
+            heading.setWordWrap(True)
+            value.setObjectName('metricValue')
             column.addWidget(heading)
             column.addWidget(value)
             values.addWidget(box)
             self.value_labels[key], self.value_titles[key] = value, heading
         layout.addLayout(values)
         self.detail_label = QLabel('No acquired samples yet.')
+        self.detail_label.setObjectName('mutedText')
         self.detail_label.setWordWrap(True)
         layout.addWidget(self.detail_label)
         self.plot_stack = QStackedWidget()
-        self.psd_plot = pg.PlotWidget(title='Control response PSD')
-        self.sine_plot = pg.PlotWidget(title='Control acceleration vs frequency')
+        self.psd_plot = create_plot(title='Control response PSD')
+        self.sine_plot = create_plot(title='Control acceleration vs frequency')
         for plot in (self.psd_plot, self.sine_plot):
             configure_plot(plot)
-            plot.addLegend(brush=pg.mkBrush(QApplication.palette().base().color()))
+            plot.addLegend(brush=pg.mkBrush(workspace_colors()['paper']))
             self.plot_stack.addWidget(plot)
         self.psd_plot.setLogMode(x=True, y=True)
         self.psd_plot.setLabel('left', 'PSD', units='g²/Hz')
@@ -450,15 +530,35 @@ class RunView(QWidget):
         self.sine_target_curve = self.sine_plot.plot(pen=target_pen, name='Full target')
         self.sine_ramp_curve = self.sine_plot.plot(pen=ramp_pen, symbol='t', symbolSize=5, name='Ramp target')
         layout.addWidget(self.plot_stack, 1)
+        # Keep the legend outside the data area: a large low-frequency sine
+        # response must not disappear behind the legend's opaque background.
+        self.legend_stack = QStackedWidget()
+        for plot, curves in [
+            (self.psd_plot, (self.psd_measured_curve, self.psd_target_curve, self.psd_ramp_curve)),
+            (self.sine_plot, (self.sine_measured_curve, self.sine_target_curve, self.sine_ramp_curve)),
+        ]:
+            labels = []
+            for curve in curves:
+                pen = pg.mkPen(curve.opts['pen'])
+                mark = '····' if pen.style() == Qt.DotLine else '— —' if pen.style() == Qt.DashLine else '━━'
+                labels.append(f'<span style="color:{pen.color().name()}">{mark}</span>&nbsp;{escape(curve.name())}')
+            legend = QLabel('&nbsp;&nbsp;&nbsp; '.join(labels))
+            legend.setObjectName('mutedText')
+            legend.setWordWrap(True)
+            legend.setContentsMargins(6, 2, 6, 2)
+            self.legend_stack.addWidget(legend)
+            plot.getPlotItem().legend.hide()
+        layout.addWidget(self.legend_stack)
         self.note_label = QLabel()
+        self.note_label.setObjectName('mutedText')
         self.note_label.setWordWrap(True)
         layout.addWidget(self.note_label)
 
         self.diagnostics_widget = QTabWidget()
-        self.metrics_plot = pg.PlotWidget(title='Acceleration trend')
-        self.percent_plot = pg.PlotWidget(title='Ramp and command clipping')
-        self.plant_gain_plot = pg.PlotWidget(title='Estimated plant gain')
-        self.eq_plot = pg.PlotWidget(title='Equalizer gains')
+        self.metrics_plot = create_plot(title='Acceleration trend')
+        self.percent_plot = create_plot(title='Ramp and command clipping')
+        self.plant_gain_plot = create_plot(title='Estimated plant gain')
+        self.eq_plot = create_plot(title='Equalizer gains')
         for plot, title, quantity, unit in [
             (self.metrics_plot, 'Acceleration', 'Acceleration', 'g RMS'),
             (self.percent_plot, 'Ramp / clipping', 'Percentage', '%'),
@@ -468,7 +568,7 @@ class RunView(QWidget):
             configure_plot(plot)
             plot.setLabel('left', quantity, units=unit)
             plot.setLabel('bottom', 'Elapsed run time', units='s')
-            plot.addLegend(brush=pg.mkBrush(QApplication.palette().base().color()))
+            plot.addLegend(brush=pg.mkBrush(workspace_colors()['paper']))
             self.diagnostics_widget.addTab(plot, title)
         self.eq_plot.setLabel('bottom', 'Frequency', units='Hz')
         self.rms_curve = self.metrics_plot.plot(pen=pg.mkPen(COLORS[0], width=2), name='Measured')
@@ -492,12 +592,15 @@ class RunView(QWidget):
         self.update_eq(None)
         sine = settings.test_mode == 'sine_sweep'
         self.plot_stack.setCurrentIndex(1 if sine else 0)
+        self.legend_stack.setCurrentIndex(1 if sine else 0)
         self.value_titles['accel'].setText('Acceleration · g peak estimate' if sine else 'Control band · g RMS')
+        self.value_titles['target'].setText('Full target · g peak' if sine else 'Full target · g RMS')
         self.value_titles['frequency'].parentWidget().setVisible(sine)
         self.metrics_plot.setLabel('left', 'Acceleration estimate' if sine else 'Band acceleration', units='g peak' if sine else 'g RMS')
         self.diagnostics_widget.setTabVisible(3, not sine)
         for label in self.value_labels.values():
             label.setText('—')
+        self.value_labels['target'].setText(f'{settings.target_rms_g * (math.sqrt(2) if sine else 1):.3f}')
         self.detail_label.setText('No acquired samples yet.')
         if sine:
             self.band = sorted([settings.sine_start_hz, settings.sine_end_hz])
@@ -509,7 +612,7 @@ class RunView(QWidget):
             frequency_ticks(self.sine_plot, *self.band)
             source = settings.calibration_source or 'Calibration source not recorded'
             drive = 'Drive-table amplitude' if settings.sine_drive_table else 'Default drive amplitude'
-            self.note_label.setText(f'{drive} · {source}. Peak estimate = √2 × block standard deviation; noise and harmonics affect it.')
+            self.note_label.setText(f'{drive} · no amplitude feedback · {source}. Peak estimate = √2 × block standard deviation; noise and harmonics affect it.')
         else:
             self.band = [settings.target_psd_points[0][0], settings.target_psd_points[-1][0]]
             f = np.geomspace(*self.band, 256)
@@ -598,16 +701,16 @@ class ChannelView(QWidget):
         controls.addWidget(self.info_label)
         controls.addStretch()
         layout.addLayout(controls)
-        self.time_plot = pg.PlotWidget(title='Acquired acceleration')
+        self.time_plot = create_plot(title='Acquired acceleration')
         self.time_plot.setLabel('left','Acceleration', units='g')
         self.time_plot.setLabel('bottom','Acquired sample time', units='s')
-        self.psd_plot = pg.PlotWidget(title='Channel PSD')
+        self.psd_plot = create_plot(title='Channel PSD')
         self.psd_plot.setLabel('left','PSD',units='g²/Hz')
         self.psd_plot.setLabel('bottom','Frequency',units='Hz')
         self.psd_plot.setLogMode(x=True,y=True)
         for plot in (self.time_plot,self.psd_plot):
             configure_plot(plot)
-            plot.addLegend(brush=pg.mkBrush(QApplication.palette().base().color()))
+            plot.addLegend(brush=pg.mkBrush(workspace_colors()['paper']))
             layout.addWidget(plot,1)
         self.is_streaming = False
         self.configure_settings(settings)
@@ -754,11 +857,10 @@ class ResultsView(QWidget):
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(Path(self.reports[index]['log_dir']).resolve())))
 
 
-class WorkspaceWindow(QMainWindow):
+class WorkspaceWindow(FloatingWorkspaceMixin, QMainWindow):
     def __init__(self, shared_config, worker_factory):
         super().__init__()
         self.setWindowTitle('Shaker Control')
-        self.resize(1200,800)
         self.shared_config, self.worker_factory = shared_config, worker_factory
         self.settings = shared_config.snapshot()
         self.controller_thread = None
@@ -772,109 +874,11 @@ class WorkspaceWindow(QMainWindow):
         self.fault_message = ''
         self._close_pending = False
         pg.setConfigOptions(antialias=True,foreground=QApplication.palette().text().color(),background=QApplication.palette().base().color())
-        central = QWidget()
-        self.setCentralWidget(central)
-        layout = QVBoxLayout(central)
-        layout.setContentsMargins(18,14,18,14)
-        title_row = QHBoxLayout()
-        title = QLabel('Shaker Control')
-        title.setStyleSheet('font-size: 20px; font-weight: 500;')
-        title_row.addWidget(title)
-        title_row.addStretch()
-        self.backend_label = QLabel()
-        title_row.addWidget(self.backend_label)
-        self.status_label = QLabel('Ready')
-        self.status_label.setAccessibleName('Run status')
-        self.status_label.setStyleSheet('font-weight: 600;')
-        title_row.addWidget(self.status_label)
-        layout.addLayout(title_row)
-        run_bar = QHBoxLayout()
-        run_bar.addWidget(QLabel('Test'))
-        self.mode_combo = QComboBox()
-        self.mode_combo.setAccessibleName('Test mode')
-        self.mode_combo.addItem('Random vibration','random')
-        self.mode_combo.addItem('Sine sweep','sine_sweep')
-        self.mode_combo.setCurrentIndex(1 if self.settings.test_mode == 'sine_sweep' else 0)
-        run_bar.addWidget(self.mode_combo)
-        run_bar.addWidget(QLabel('Backend'))
-        self.backend_combo = QComboBox()
-        self.backend_combo.setAccessibleName('Acquisition backend')
-        self.backend_combo.addItem('Hardware',False)
-        self.backend_combo.addItem('Simulation',True)
-        self.backend_combo.setCurrentIndex(1 if self.settings.simulation_mode else 0)
-        run_bar.addWidget(self.backend_combo)
-        run_bar.addStretch()
-        self.setup_button = QPushButton('Set up test')
-        self.setup_button.setCheckable(True)
-        run_bar.addWidget(self.setup_button)
-        self.start_button = QPushButton()
-        self.stop_button = QPushButton('Stop')
-        self.stop_button.setStyleSheet('QPushButton:enabled { color: #bd493c; }')
-        run_bar.addWidget(self.start_button)
-        run_bar.addWidget(self.stop_button)
-        layout.addLayout(run_bar)
-        self.setup_summary = QLabel()
-        self.setup_summary.setWordWrap(True)
-        layout.addWidget(self.setup_summary)
-        self.notice_label = QLabel()
-        self.notice_label.setWordWrap(True)
-        self.notice_label.hide()
-        layout.addWidget(self.notice_label)
-        self.fault_banner = QWidget()
-        fault_layout = QHBoxLayout(self.fault_banner)
-        fault_layout.setContentsMargins(0,5,0,5)
-        self.fault_label = QLabel()
-        self.fault_label.setWordWrap(True)
-        self.fault_label.setStyleSheet('color: #bd493c;')
-        fault_layout.addWidget(self.fault_label,1)
-        self.switch_simulation_button = QPushButton('Switch to simulation')
-        self.switch_simulation_button.clicked.connect(self.switch_to_simulation)
-        fault_layout.addWidget(self.switch_simulation_button)
-        self.dismiss_fault_button = QPushButton('Dismiss fault')
-        self.dismiss_fault_button.clicked.connect(self.dismiss_fault)
-        fault_layout.addWidget(self.dismiss_fault_button)
-        layout.addWidget(self.fault_banner)
-        self.fault_banner.hide()
-
         self.controller_tab = RunView(self.settings)
         self.realtime_tab = ChannelView(self.settings)
         self.results_tab = ResultsView()
-        self.pages = QStackedWidget()
-        nav = QHBoxLayout()
-        self.nav_buttons = []
-        for index, (label, page) in enumerate([
-            ('Run',self.controller_tab),('Channels',self.realtime_tab),
-            ('Diagnostics',self.controller_tab.diagnostics_widget),('Results',self.results_tab),
-        ]):
-            self.pages.addWidget(page)
-            button = QPushButton(label)
-            button.setCheckable(True)
-            button.clicked.connect(lambda checked, index=index: self.show_page(index))
-            self.nav_buttons.append(button)
-            nav.addWidget(button)
-        nav.addStretch()
-        layout.addLayout(nav)
-        layout.addWidget(self.pages,1)
-        self.show_page(0)
-
         self.config_tab = SettingsPanel(shared_config)
-        self.config_tab.test_mode_combo = self.mode_combo
-        self.config_dock = QDockWidget('Test setup',self)
-        self.config_dock.setObjectName('test-setup-dock')
-        self.config_dock.setAllowedAreas(Qt.RightDockWidgetArea|Qt.LeftDockWidgetArea)
-        self.config_dock.setFeatures(QDockWidget.DockWidgetClosable)
-        self.config_dock.setWidget(self.config_tab)
-        self.config_dock.setMinimumWidth(340)
-        self.addDockWidget(Qt.RightDockWidgetArea,self.config_dock)
-        self.config_dock.hide()
-        self.config_dock.visibilityChanged.connect(self._dock_visible)
-        self.setup_button.toggled.connect(self.config_dock.setVisible)
-        self.config_tab.applied.connect(self._settings_applied)
-        self.config_tab.dirty_changed.connect(self._draft_changed)
-        self.mode_combo.currentIndexChanged.connect(lambda: self.config_tab.set_mode(self.mode_combo.currentData()))
-        self.backend_combo.currentIndexChanged.connect(lambda: self.config_tab.set_backend(self.backend_combo.currentData()))
-        self.start_button.clicked.connect(self.start_controller)
-        self.stop_button.clicked.connect(self.stop_controller)
+        self._build_floating_workspace()
         self._refresh_controls()
 
     @property
@@ -884,11 +888,19 @@ class WorkspaceWindow(QMainWindow):
     def _dock_visible(self, visible):
         with QSignalBlocker(self.setup_button):
             self.setup_button.setChecked(visible)
+        QTimer.singleShot(0, self._reflow_shell)
 
     def show_page(self, index):
         self.pages.setCurrentIndex(index)
         for position, button in enumerate(self.nav_buttons):
             button.setChecked(position == index)
+        if hasattr(self, 'view_title'):
+            self._sync_view_header(index)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, 'config_dock'):
+            QTimer.singleShot(0, self._reflow_shell)
 
     def _settings_applied(self, settings):
         if self.busy:
@@ -905,6 +917,8 @@ class WorkspaceWindow(QMainWindow):
             self.backend_combo.setCurrentIndex(1 if settings.simulation_mode else 0)
         if not self.fault_message:
             self.run_state = 'ready'
+        self._rebuild_browser()
+        self._record_shell_event(f'Setup applied · {settings.target_summary} · {settings.backend} requested')
         self._refresh_controls()
 
     def _draft_changed(self, dirty):
@@ -935,15 +949,17 @@ class WorkspaceWindow(QMainWindow):
         self.dismiss_fault_button.setEnabled(not busy)
         self.switch_simulation_button.setVisible(bool(self.fault_message) and not self.settings.simulation_mode)
         self.switch_simulation_button.setEnabled(not busy)
+        self._sync_shell_state()
 
     def start_controller(self):
         if self.busy or self.config_tab.dirty:
-            self.config_dock.show()
+            if not self.busy:
+                self.inspect_settings('all')
             return False
         try:
             snapshot = self.shared_config.snapshot()
         except ConfigurationError as error:
-            self.config_dock.show()
+            self.inspect_settings('all')
             self.config_tab.show_errors(error.errors)
             return False
         self.settings = snapshot
@@ -969,6 +985,7 @@ class WorkspaceWindow(QMainWindow):
         worker.report_ready.connect(self._worker_report)
         thread.finished.connect(self._thread_finished)
         self.run_state = 'starting'
+        self._record_shell_event(f'Start requested · {snapshot.backend} · setup {snapshot.config_id}')
         self._refresh_controls()
         self.show_page(0)
         thread.start()
@@ -978,6 +995,7 @@ class WorkspaceWindow(QMainWindow):
         if self.controller_worker is None or self.run_state not in ('starting','running'):
             return False
         self.run_state = 'stopping'
+        self._record_shell_event('Stop requested · waiting for acquisition and recording cleanup')
         self.controller_worker.stop()
         self.notice_label.setText('Stop requested · waiting for acquisition and recording to finish.')
         self.notice_label.show()
@@ -996,6 +1014,7 @@ class WorkspaceWindow(QMainWindow):
         self.run_state = state
         if state == 'fault':
             self.fault_message = event['message']
+        self._record_shell_event(f'{state.title()} · {event.get("message") or self.actual_backend or "Backend not initialized"}')
         self._refresh_controls()
 
     def _worker_notice(self, message):
@@ -1008,6 +1027,7 @@ class WorkspaceWindow(QMainWindow):
     def _worker_report(self, report):
         self.last_report = report
         self.results_tab.add_report(report)
+        self._rebuild_browser()
         self.realtime_tab.stop_streaming()
         self.run_state = report['outcome']
         if report['error']:
@@ -1043,7 +1063,7 @@ class WorkspaceWindow(QMainWindow):
         if self.busy:
             return
         self.backend_combo.setCurrentIndex(1)
-        self.config_dock.show()
+        self.inspect_settings('channel')
         self.notice_label.setText('Simulation selected in the draft. Apply setup before starting.')
         self.notice_label.show()
 

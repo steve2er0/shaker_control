@@ -35,17 +35,25 @@ and configured channels are also required; pip does not install that driver.
 python app.py
 ```
 
-The workspace opens on **Run**, with a large mode-specific response plot. Test
-mode, backend, run state, **Set up test**, **Start**, and **Stop** stay visible
-across **Run**, **Channels**, **Diagnostics**, and **Results**.
+The floating workspace uses Acoustic Workbench's layout: a slim app bar, grouped
+task ribbon, collapsible **Test browser**, large response plot, and contextual
+**Inspector**. The task ribbon offers **Test**, **Acquisition**, **Control**,
+**Results**, and **View**. The plot's compact view selector switches between
+**Response**, **Channels**, **Diagnostics**, and **Results**. Test mode, backend,
+run state, **Start**, and **Stop** stay available in every view.
 
 1. Choose **Random vibration** or **Sine sweep** and **Hardware** or **Simulation**.
-2. Open **Set up test**. Enter the target, acquisition settings, voltage limits,
-   and hardware channels/sensitivity or simulation parameters. Only the selected
-   mode and backend controls are shown. Sine acceleration explicitly uses g peak
-   or g RMS; ramp controls use acceleration amplitude percent.
+2. Select **Target** in the ribbon or test browser to edit the PSD or sine
+   profile. Use **Acquisition → Clock** for sample rate and block settings,
+   **Channels / Backend setup** for input scaling or simulation parameters, and
+   **Control** for voltage limits, PI/ramp tuning, equalizer, or drive calibration.
+   **Inspector ▾ → All test settings** opens the full form. Only the selected
+   context, test mode, and backend controls are shown. Sine acceleration explicitly
+   uses g peak or g RMS; ramp controls use acceleration amplitude percent.
 3. Click **Apply setup**. Invalid combinations show field errors. Unapplied draft
-   changes disable Start. Apply remains visible below the scrolling setup form.
+   changes disable Start. Apply and **Discard draft** remain visible below the
+   scrolling form. Switching inspector context preserves the draft; Discard
+   restores the accepted settings and mode/backend selectors.
 4. Click **Start simulation** or **Start hardware**. The workspace shows Starting
    until the selected backend and requested recording initialize successfully.
 5. Use **Stop** from any view, or allow a nonrepeating sweep to reach Complete.
@@ -63,7 +71,7 @@ backend, and preset controls are locked until its worker finishes cleanup. Stop
 also works during Starting. Stopping and closing wait asynchronously for finite
 I/O and recording finalization; an active thread is not discarded on a timer.
 
-**Load preset** and **Save preset** use JSON setup files. Loading validates before
+**Test → Preset → Load preset / Save preset** use JSON setup files. Loading validates before
 changing accepted settings and records the source path without rewriting the
 imported file. GUI edits persist for the session or in a saved preset; they do not
 rewrite `config.py`, which supplies launch defaults. Targets, sine drive tables,
@@ -81,6 +89,18 @@ Zero PI gains are allowed; random ramp starts support 0–200% and sine starts
 engines. The controller and channel viewer use the same accepted sample rate and
 effective channel count. Applying settings or starting a new run clears live
 curves and histories; earlier reports remain in Results for the session.
+
+The browser lists the applied target, limits, calibration source, configured
+channels, sample clock, and completed session runs. Selecting a channel shows its
+time/PSD view and input settings; selecting a run shows that run's captured report.
+Historic reports do not reload old sample plots. **Run history** opens the current
+session's setup/start/stop/fault events; physical actions have no undo operation.
+**View → Fit plots** fits the current plots. Closing the inspector restores the
+plot space. In narrower windows, opening the inspector temporarily hides the
+browser; closing it restores the browser if it was enabled. The ribbon reflows
+its run controls onto another row when needed. The status strip retains acquisition
+resolution and recording state. The interface follows the launch palette for light
+or dark appearance and opens at 1,360 × 860 (minimum 900 × 620).
 
 ### Random vibration
 
@@ -208,7 +228,7 @@ and crest factor describe the final waveform after both limiters, before the
 controller's separate absolute voltage clip. Peak compression can alter PSD and
 introduce harmonics; it does not guarantee acceleration tracking.
 
-The Run view separates the full PSD target, ramp-adjusted target, and averaged
+The Response view separates the full PSD target, ramp-adjusted target, and averaged
 control response. Channels uses consistent colors for time and PSD traces.
 Diagnostics separates acceleration, ramp/clipping percentage, plant gain in g/V,
 and random equalizer amplitude gains into unit-specific plots. Histories use
@@ -266,12 +286,19 @@ includes prescribed resonances, noise, delay, and nonlinearity, rather than a
 validated model of a particular shaker. Tracking accuracy, stability, and physical
 protection require separate evidence for the configured equipment and load.
 
+The floating-workspace review used 8 kHz simulation settings for its live UI
+captures. A preliminary run at the 51.2 kHz launch defaults produced one recorded
+block in about 39.5 seconds including stop cleanup; real-time simulation performance
+at those defaults is not established by this review. The synthetic multichannel
+processing is unchanged by the interface update.
+
 ## Repository map
 
 | File | Responsibility |
 |---|---|
 | `app.py` | Desktop entry point, acquisition worker, and run logger |
 | `workspace_ui.py` | Run workspace, setup, channels, diagnostics, and results |
+| `workspace_shell.py` | Floating ribbon/browser/inspector layout, navigation, icons, and appearance |
 | `run_settings.py` | Immutable setup capture, validation, and target summaries |
 | `config.py` | Controller, hardware, simulation, target, and sweep settings |
 | `rv_controller.py` | Random control, equalization, noise generation, and limiters |
@@ -283,6 +310,16 @@ protection require separate evidence for the configured equipment and load.
 | `requirements*.txt` | Runtime, test, and optional hardware dependency pins |
 
 ## UI audit and review evidence
+
+The implemented floating layout is shown in [Response](docs/floating-workspace/02-random-running.png),
+[target inspector](docs/floating-workspace/03-target-inspector.png),
+[sine completion](docs/floating-workspace/05-sine-complete.png),
+[compact fault view](docs/floating-workspace/07-compact-fault.png), and
+[dark appearance](docs/floating-workspace/08-dark.png).
+[Floating workspace validation](docs/floating-workspace/validation.json) records
+simulation runs, HDF5 checks, source hashes, test results, and review limits.
+These captures are offscreen Qt. The native macOS window and target-inspector
+navigation were also inspected; no physical hardware was exercised.
 
 The [design audit](docs/design-audit/audit-report.html) and
 [interactive proposal](docs/design-audit/ui-flow-proposal.html) describe the
