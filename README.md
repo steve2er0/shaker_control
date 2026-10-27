@@ -286,11 +286,33 @@ includes prescribed resonances, noise, delay, and nonlinearity, rather than a
 validated model of a particular shaker. Tracking accuracy, stability, and physical
 protection require separate evidence for the configured equipment and load.
 
-The floating-workspace review used 8 kHz simulation settings for its live UI
-captures. A preliminary run at the 51.2 kHz launch defaults produced one recorded
-block in about 39.5 seconds including stop cleanup; real-time simulation performance
-at those defaults is not established by this review. The synthetic multichannel
-processing is unchanged by the interface update.
+### Simulation performance
+
+The simulator evaluates its delay history and response-channel IIR filters by
+block, carrying filter state between blocks. Filter coefficients, gains, noise,
+nonlinearity, and the existing delay-register convention are preserved. Random
+and sine workers subtract processing time from their interruptible block wait.
+
+The [default-rate performance review](docs/simulation-performance/validation.json)
+checks 51,200 Hz, one-second blocks, four channels, live Qt plots, and HDF5 recording.
+On the reviewed macOS ARM64 environment, mock acquisition improved from about
+0.38 s to 0.009 s per block. The GUI delivered one-second blocks about every
+1.00–1.01 s, with Stop and recording cleanup around 0.03 s. These are local
+simulation measurements, not hardware or hard real-time guarantees. The sine
+review covers the first six blocks of its initial dwell, not a full default sweep.
+
+Reproduce the block benchmark and compare seeded responses with the prior
+implementation, then run the GUI timing/recording check:
+
+```bash
+python scripts/benchmark_simulation.py --reference-ref 5105dbc
+python scripts/review_simulation_performance.py --blocks 6 --check-budget
+```
+
+The earlier floating-workspace captures used 8 kHz settings. Their preliminary
+39.5-second result used a polling harness and is superseded by the normal Qt event
+loop measurements above; that harness's timing is not the desktop application's
+block cadence. Response tracking/calibration limitations remain unchanged.
 
 ## Repository map
 

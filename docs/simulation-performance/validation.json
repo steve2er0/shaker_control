@@ -1,0 +1,155 @@
+{
+  "reference_commit": "5105dbc200ad807883efd7546f9ceb1819fd71ea",
+  "environment": {
+    "system": "Darwin",
+    "machine": "arm64",
+    "python": "3.9.6",
+    "numpy": "1.24.3",
+    "scipy": "1.13.1",
+    "pyside": "6.9.2",
+    "qt_platform": "offscreen"
+  },
+  "baseline_profile": {
+    "method": "cProfile, two 51,200-sample four-channel acquisitions",
+    "total_wall_s": 0.9115835030000001,
+    "hotspots": [
+      {
+        "function": "process",
+        "calls": 2,
+        "cumulative_s": 0.053889542000000006
+      },
+      {
+        "function": "_apply_sdof",
+        "calls": 6,
+        "cumulative_s": 0.847331876
+      },
+      {
+        "function": "read_many_sample",
+        "calls": 2,
+        "cumulative_s": 0.9090143340000001
+      }
+    ]
+  },
+  "block_benchmark": {
+    "fs_hz": 51200.0,
+    "block_seconds": 1,
+    "samples_per_block": 51200,
+    "channels": 4,
+    "blocks": 5,
+    "seed": 20261026,
+    "current_block_wall_s": [
+      0.008987166000000046,
+      0.008213833999999975,
+      0.008817875000000086,
+      0.008573582999999996,
+      0.008510124999999924
+    ],
+    "current_median_s": 0.008573582999999996,
+    "simulation_sha256": "ee43f17892dc49ced5ab8181a28745a868b9bf64aa8add79985f878ea0457326",
+    "reference_ref": "5105dbc",
+    "reference_sha256": "79db2b2367c6f2b0d339a721be04380f967d4f607b32ff445574aef0438c9b5b",
+    "reference_block_wall_s": [
+      0.509040167,
+      0.4864229579999999,
+      0.38319391699999983,
+      0.37033562500000006,
+      0.3700467500000002
+    ],
+    "reference_median_s": 0.38319391699999983,
+    "median_speedup": 44.694722964716156,
+    "max_abs_difference_g": 8.766321002440236e-13,
+    "parity_rtol": 1e-10,
+    "parity_atol_g": 1e-11
+  },
+  "gui_before": {
+    "method": "Qt event loop, live plots, default-rate simulation, real HDF5 recording",
+    "hardware_task_attempts": 0,
+    "cases": [
+      {
+        "mode": "random",
+        "fs_hz": 51200,
+        "block_samples": 51200,
+        "channels": 4,
+        "blocks": 4,
+        "first_block_wall_s": 0.45679337500000017,
+        "median_block_interval_s": 1.4473020839999995,
+        "max_block_interval_s": 1.453961875,
+        "median_mock_read_s": 0.37256289600000003,
+        "max_mock_read_s": 0.3770830829999996,
+        "max_gui_heartbeat_gap_s": 0.05891129199999945,
+        "stop_to_finished_s": 0.029870458999999627,
+        "outcome": "stopped",
+        "recording_checked": true
+      }
+    ],
+    "errors": []
+  },
+  "gui_after": {
+    "method": "Qt event loop, live plots, default-rate simulation, real HDF5 recording",
+    "hardware_task_attempts": 0,
+    "cases": [
+      {
+        "mode": "random",
+        "fs_hz": 51200,
+        "block_samples": 51200,
+        "channels": 4,
+        "blocks": 6,
+        "first_block_wall_s": 0.09385720799999997,
+        "median_block_interval_s": 1.0005975410000003,
+        "max_block_interval_s": 1.023128,
+        "median_mock_read_s": 0.007346957999999848,
+        "max_mock_read_s": 0.0075585000000000235,
+        "max_gui_heartbeat_gap_s": 0.05837220799999976,
+        "stop_to_finished_s": 0.0325527499999998,
+        "outcome": "stopped",
+        "recording_checked": true
+      },
+      {
+        "mode": "sine_sweep",
+        "fs_hz": 51200,
+        "block_samples": 51200,
+        "channels": 4,
+        "blocks": 6,
+        "first_block_wall_s": 0.05651316700000031,
+        "median_block_interval_s": 1.003246665999999,
+        "max_block_interval_s": 1.0053247079999998,
+        "median_mock_read_s": 0.011933250000000228,
+        "max_mock_read_s": 0.0133000420000009,
+        "max_gui_heartbeat_gap_s": 0.05608974999999994,
+        "stop_to_finished_s": 0.0207912910000001,
+        "outcome": "stopped",
+        "recording_checked": true
+      }
+    ],
+    "errors": []
+  },
+  "regression": {
+    "tests": "133",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0",
+    "time": "19.447"
+  },
+  "checks": {
+    "pip_check": "passed",
+    "git_diff_check": "passed",
+    "python_syntax": "passed"
+  },
+  "source_sha256": {
+    "simulation.py": "ee43f17892dc49ced5ab8181a28745a868b9bf64aa8add79985f878ea0457326",
+    "app.py": "7a18a88a409db8d2034bc1c8735c7924a0d438b04fd78f02cdceb7fd20536889",
+    "config.py": "41a422b02e241ed8b6cf6a97ceeec8baa9ecb4c90fcf2f3501675538be107448",
+    "tests/test_simulation.py": "70af0a2baf81789e4bfcb2524ea13d50b8a7d355722c9892865675fb838245dd",
+    "scripts/benchmark_simulation.py": "f9e4358622bb1f6b9568a78e9973d2afa379e1ab3f8cb26ba21d9f0da2446757",
+    "scripts/review_simulation_performance.py": "2dd9910b1a0db9d7e52d00d1cf816e29632e3d13f8b3155f4e2ebd818fde4281",
+    "README.md": "80f3a6ac83fafd6f830c6287f14b4c967c096156ef10641ff3ba41ddac1809c6"
+  },
+  "limitations": [
+    "Local timing measurements are not a hard real-time guarantee.",
+    "No physical NI task was opened; hardware stop latency and shaker protection are not established.",
+    "The default sine test covers its first six one-second blocks at 20 Hz, not a complete repeating sweep.",
+    "The earlier 39.5 s figure used a QTest polling harness; the normal Qt event loop baseline is recorded separately here.",
+    "The original delay-register convention and block-dependent low-signal noise guard remain unchanged."
+  ],
+  "native_app": "Relaunched with the updated code; left idle with launch defaults. Native performance was not measured separately from the Qt event-loop review."
+}

@@ -49,13 +49,7 @@ class ShakerPlantSimulator:
         if len(voltage_input) == 0:
             return np.array([])
         
-        # Apply delay
-        delayed_input = np.zeros_like(voltage_input)
-        for i, v in enumerate(voltage_input):
-            # Shift delay buffer
-            self.delay_buffer[1:] = self.delay_buffer[:-1]
-            self.delay_buffer[0] = v
-            delayed_input[i] = self.delay_buffer[-1]
+        delayed_input = self._delay_input(voltage_input)
         
         # Base linear response
         acceleration = delayed_input * self.base_gain
@@ -90,6 +84,19 @@ class ShakerPlantSimulator:
         
         return acceleration
 
+    def _delay_input(self, voltage_input):
+        """Advance the existing shift register once per block.
+
+        The register includes the current sample: its legacy length D therefore
+        delays the output by max(D - 1, 0) samples. Keep that convention and the
+        newest-first buffer order, including blocks shorter than the register.
+        """
+        signal = np.asarray(voltage_input)
+        history = np.concatenate((self.delay_buffer[::-1], signal))
+        delayed = history[1:signal.size + 1].astype(signal.dtype, copy=False)
+        self.delay_buffer[:] = history[-self.delay_buffer.size:][::-1]
+        return delayed
+
 
 # --------------- Mock DAQ Interface (for simulation) ---------------
 class MockAnalogSingleChannelWriter:
@@ -118,8 +125,7 @@ class MockAnalogSingleChannelReader:
             state = {
                 'b': b_d,
                 'a': a_d,
-                'u_hist': np.zeros(len(b_d) - 1, dtype=float),
-                'y_hist': np.zeros(len(a_d) - 1, dtype=float),
+                'zi': np.zeros(max(len(b_d), len(a_d)) - 1, dtype=float),
                 'gain': gain,
                 'noise_scale': (idx + 1) * 0.1 * self.plant_sim.noise_level
             }
@@ -138,32 +144,13 @@ class MockAnalogSingleChannelReader:
         return b_d, a_d
 
     def _apply_sdof(self, input_signal, filt_state):
-        b = filt_state['b']
-        a = filt_state['a']
-        u_hist = filt_state['u_hist']
-        y_hist = filt_state['y_hist']
-        gain = filt_state['gain']
-
-        output = np.empty_like(input_signal)
-        for n, u_n in enumerate(input_signal):
-            acc = b[0] * u_n
-            if len(b) > 1:
-                acc += np.dot(b[1:], u_hist)
-            if len(a) > 1:
-                acc -= np.dot(a[1:], y_hist)
-
-            y_n = acc
-            output[n] = y_n * gain
-
-            # Update histories (simple shift register)
-            if len(u_hist) > 0:
-                u_hist[1:] = u_hist[:-1]
-                u_hist[0] = u_n
-            if len(y_hist) > 0:
-                y_hist[1:] = y_hist[:-1]
-                y_hist[0] = y_n
-
-        return output
+        """Evaluate the same recurrence in SciPy, carrying state across blocks."""
+        if len(input_signal) == 0:
+            return np.empty_like(input_signal)
+        output, filt_state['zi'] = lfilter(
+            filt_state['b'], filt_state['a'], input_signal, zi=filt_state['zi'])
+        # Feedback state is the unscaled response, as in the original filter.
+        return (output * filt_state['gain']).astype(np.asarray(input_signal).dtype, copy=False)
 
     def read_many_sample(self, data_array, number_of_samples_per_channel, timeout=10.0):
         # Get the last written AO data and simulate plant response

@@ -652,7 +652,6 @@ class ControllerWorker(QThread):
             level_fraction = self.shared_config.initial_level_fraction
             block_duration = block_samples / max(fs, 1e-9)
             io_timeout = max(1.0, block_duration * 2.0 + 0.5)
-            loop_sleep = block_duration if simulation_mode else 0.0
             adapt_threshold = float(getattr(self.shared_config, 'eq_adapt_level_threshold', 0.4))
             adapt_power = float(max(0.0, getattr(self.shared_config, 'eq_adapt_level_power', 1.0)))
             adapt_min_weight = float(np.clip(getattr(self.shared_config, 'eq_adapt_min_weight', 0.0), 0.0, 1.0))
@@ -793,14 +792,11 @@ class ControllerWorker(QThread):
                 if loop_count % 50 == 0:  # Every ~5 seconds
                     print(f"Debug: Emitting data at {current_time:.1f}s, RMS={np.std(accel_data):.4f}")
                 
-                # Pace the loop based on execution environment
-                if simulation_mode:
-                    if loop_sleep > 0:
-                        self.should_stop.wait(loop_sleep)
-                else:
-                    remaining = block_duration - (time.perf_counter() - loop_start)
-                    if remaining > 0:
-                        self.should_stop.wait(remaining)
+                # Processing consumes part of the block's wall-clock budget.
+                # Both backends wait only for the remainder, interruptibly.
+                remaining = block_duration - (time.perf_counter() - loop_start)
+                if remaining > 0:
+                    self.should_stop.wait(remaining)
                 
         except Exception as e:
             cancelled_read = (self.should_stop.is_set() and DaqError is not None
@@ -856,7 +852,6 @@ class ControllerWorker(QThread):
 
         block_duration = block_samples / max(fs, 1e-9)
         io_timeout = max(1.0, block_duration * 2.0 + 0.5)
-        loop_sleep = block_duration if simulation_mode else 0.0
         plant_gain = max(float(plant_gain_initial), 1e-6)
         last_level_update = time.time()
         t_last_print = time.time()
@@ -1028,13 +1023,9 @@ class ControllerWorker(QThread):
                 if getattr(config, 'CONSOLE_UPDATE_INTERVAL', 5.0) > 0:
                     pass  # optional additional logging removed for simplicity
 
-                if simulation_mode:
-                    if loop_sleep > 0:
-                        self.should_stop.wait(loop_sleep)
-                else:
-                    remaining = block_duration - (time.perf_counter() - loop_start)
-                    if remaining > 0:
-                        self.should_stop.wait(remaining)
+                remaining = block_duration - (time.perf_counter() - loop_start)
+                if remaining > 0:
+                    self.should_stop.wait(remaining)
 
             first_step = False
             if not stepper.advance():
