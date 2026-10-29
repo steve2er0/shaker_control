@@ -8,8 +8,8 @@ import pytest
 from rv_controller import RandomAmplitudeControl, RandomVibrationController
 
 
-def run_plant(gain, duration=120, delay=1, block_seconds=1., max_volts=1.4):
-    controller = RandomAmplitudeControl(1., .1, 2., .9, .06, .001, max_volts)
+def run_plant(gain, duration=120, delay=1, block_seconds=1., max_volts=1.4, kp=.9):
+    controller = RandomAmplitudeControl(1., .1, 2., kp, .06, .001, max_volts)
     commands = deque([(0., 0.)] * delay)
     measurements, levels, integral, voltages = [], [], [], []
     for index in range(int(duration / block_seconds)):
@@ -43,6 +43,14 @@ def test_limited_actuator_does_not_wind_up_and_recovers_when_target_becomes_reac
     assert controller.command_level == 1.
     assert np.mean(response[-10:]) == pytest.approx(1., rel=.03)
     assert voltages[93] < voltages[90] / 2
+
+
+def test_moderate_proportional_trim_damps_delayed_block_feedback():
+    _, legacy, _, _, _ = run_plant(63., kp=.9)
+    _, damped, _, _, _ = run_plant(63., kp=.3)
+    assert np.std(damped[-20:]) < .25 * np.std(legacy[-20:])
+    assert max(damped) < 1.03
+    assert np.mean(damped[-20:]) == pytest.approx(1., rel=.005)
 
 
 def test_noise_without_resolved_pilot_never_causes_blind_drive_escalation():

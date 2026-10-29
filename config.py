@@ -47,7 +47,7 @@ TARGET_PSD_POINTS = [
 # ============= CONTROL PARAMETERS =============
 INITIAL_LEVEL_FRACTION = 0.1    # Start at 10% acceleration amplitude (1% target PSD)
 MAX_LEVEL_FRACTION_RATE = 2   # Max change in level per second
-KP = 0.9                        # Proportional trim on normalized RMS error
+KP = 0.3                        # Proportional trim on normalized RMS error; damp block-delay hunting
 KI = .06                        # Integral trim gain [1/s], with anti-windup
 RANDOM_INITIAL_RMS_VOLTS = 0.001  # Low-level pilot used to measure the random plant gain
 

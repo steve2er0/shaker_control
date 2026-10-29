@@ -161,6 +161,8 @@ duration, is bounded, and freezes when further correction would push into voltag
 or rate limits. PI gains now refer to normalized RMS trim, with integral gain in
 1/s, rather than absolute PSD density. The equalizer uses the ramp-scaled target,
 with bounded band adjustments, and pauses during identification or command limiting.
+The default normalized proportional gain is 0.3; existing presets retain their
+saved gains. Gain selection still depends on the configured plant and block delay.
 
 The current default PSD points, in Hz and g²/Hz, are:
 
@@ -258,7 +260,7 @@ record run files.
 | Welch segment length | 4,096 samples (12.5 Hz bin spacing) |
 | Equalizer | 36 bands |
 | Initial random level fraction | 0.1 |
-| PI gains | Kp = 0.9, Ki = 0.06 |
+| PI gains | Kp = 0.3, Ki = 0.06 |
 | AO absolute voltage clip | ±1.8 V |
 | RMS voltage limit / crest-factor limit | 1.4 V / 5 |
 | Sine sweep | 20–2,000 Hz, 3 g-peak, 1 octave/min, repeating |
