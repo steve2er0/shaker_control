@@ -11,7 +11,6 @@ This module contains:
 import numpy as np
 from scipy.signal import welch, firwin, lfilter, butter, sosfilt
 from scipy.interpolate import interp1d
-import time
 
 
 class MultiBandEqualizer:
@@ -125,7 +124,7 @@ class MultiBandEqualizer:
             avg_target = np.mean(psd_target_band[valid_target])
 
             if avg_measured > 1e-12:  # Avoid division by zero
-                desired_gain_adjustment = np.sqrt(avg_target / avg_measured)
+                desired_gain_adjustment = np.clip(np.sqrt(avg_target / avg_measured), .8, 1.25)
 
                 # Apply adaptation rate scaled by current weight
                 gain_update = 1.0 + effective_adapt * (desired_gain_adjustment - 1.0)
@@ -163,10 +162,6 @@ class RandomVibrationController:
         
         # Calculate target RMS
         self.a_rms_target = self._calculate_target_rms(target_psd_points)
-        
-        # Control state
-        self.integ = 0.0
-        self.t_last = time.time()
         
         print(f"Controller: target RMS = {self.a_rms_target:.4g} g, band [{self.f1:.0f}, {self.f2:.0f}] Hz")
     
@@ -235,10 +230,8 @@ class RandomVibrationController:
     def estimate_psd(self, x):
         """Estimate PSD and return metrics"""
         # Welch PSD in g^2/Hz; x must already be in g
-        if len(x) == 0 or np.all(np.abs(x) < 1e-12):
-            # Return small but valid values instead of None to avoid NaN
-            f_dummy = np.linspace(self.f1, self.f2, 100)
-            return f_dummy, np.full_like(f_dummy, 1e-8), (1e-8, 1e-8, 1e-4)
+        if len(x) == 0:
+            return None, None, None
         
         f, Pxx = welch(x, fs=self.fs, nperseg=self.welch_nperseg, noverlap=self.welch_noverlap, detrend='constant')
         # Compute metrics over [f1,f2] band
@@ -253,7 +246,7 @@ class RandomVibrationController:
         # Only consider frequencies where we have target values
         valid_target = ~np.isnan(target_psd) & band
         if not np.any(valid_target):
-            return f, Pxx, (0.0, 0.0)
+            return f, Pxx, (0.0, 0.0, 0.0)
         
         # Average measured PSD in valid band
         S_avg_measured = np.mean(Pxx[valid_target])
@@ -266,22 +259,6 @@ class RandomVibrationController:
         
         return f, Pxx, (S_avg_measured, S_avg_target, a_rms)
     
-    def update_control(self, S_avg_meas, S_avg_target, level_fraction):
-        """Update PI control and return new level fraction"""
-        # PI control on average PSD level (target vs measured)
-        err = S_avg_target - S_avg_meas
-        now = time.time()
-        dt = max(1e-3, now - self.t_last)
-        self.t_last = now
-        self.integ += err * dt
-        level_fraction_target = level_fraction + self.Kp*err + self.Ki*self.integ
-
-        # Constraints
-        level_fraction_target = max(0.0, min(2.0, level_fraction_target))
-        level_fraction = self.slew_limit(level_fraction, level_fraction_target, self.max_level_fraction_rate, dt)
-        
-        return level_fraction
-    
     @staticmethod
     def slew_limit(current, target, max_rate, dt):
         """Apply slew rate limiting"""
@@ -293,6 +270,81 @@ class RandomVibrationController:
             return current - max_delta
         else:
             return target
+
+
+class RandomAmplitudeControl:
+    """Separate the requested acceleration ramp from voltage correction.
+
+    Gain observations must refer to the command paired with the measured block,
+    including voltage limiting. Initial silence never reduces an assumed plant
+    gain and increases output. A small, explicit pilot establishes that gain.
+    PI acts on normalized RMS error as a bounded *positional* trim, with
+    conditional integration at voltage/rate limits, rather than integrating an
+    already-integrated output a second time.
+    """
+    def __init__(self, target_rms, initial_level, ramp_rate, kp, ki, initial_volts, max_volts):
+        self.target_rms = float(target_rms)
+        self.reference_level = float(initial_level)
+        self.ramp_rate = float(ramp_rate)
+        self.kp, self.ki = float(kp), float(ki)
+        self.max_volts = max(0., float(max_volts))
+        self.initial_volts = min(float(initial_volts), self.max_volts)
+        self.drive_rms = 0.
+        self.command_level = 0.
+        self.gain = None
+        self.integral = 0.
+        self.baseline_rms = 0.
+        self.feedback_ready = False
+        self._pilot_sent = False
+
+    def observe(self, measured_rms, applied_rms, applied_level, dt, limited=False):
+        dt = float(dt)  # Captured sample duration, never a host scheduling stall.
+        if not np.isfinite([measured_rms, applied_rms, applied_level, dt]).all() or dt <= 0:
+            raise ValueError('Random feedback must contain finite values and a positive sample duration')
+        if measured_rms < 0 or applied_rms < 0:
+            raise ValueError('Random feedback RMS cannot be negative')
+        if applied_rms <= 1e-12:
+            if self.gain is None:
+                self.baseline_rms = max(self.baseline_rms, measured_rms)
+            if not self._pilot_sent:
+                if self.reference_level == 0 and self.ramp_rate > 0:
+                    self.reference_level = min(.01, self.ramp_rate * dt)
+                self.drive_rms = self.initial_volts if self.reference_level > 0 else 0.
+                self.command_level = self.reference_level
+                self._pilot_sent = True
+            return
+        if measured_rms <= max(2 * self.baseline_rms, 1e-9):
+            # Hold the pilot if the control sensor cannot resolve its response.
+            # Do not drive harder based on noise or an unresponsive input.
+            self.feedback_ready = False
+            return
+
+        observed_gain = measured_rms / applied_rms
+        self.gain = observed_gain if self.gain is None else float(np.exp(
+            .8 * np.log(self.gain) + .2 * np.log(observed_gain)))
+        self.feedback_ready = True
+        reference = self.target_rms * applied_level
+        if reference <= 0:
+            return
+        error = float(np.clip((reference - measured_rms) / reference, -2., 1.))
+        # Advance the setpoint only after tracking the current one. Limit ramp
+        # growth to 20% of its present amplitude per second as well as the user
+        # limit; this keeps a fast requested ramp from outrunning observations.
+        if not limited and abs(error) <= .15:
+            step = min(self.ramp_rate * dt, .2 * max(self.reference_level, .01) * dt)
+            self.reference_level = RandomVibrationController.slew_limit(
+                self.reference_level, 1., step / dt, dt)
+        feedforward = self.target_rms * self.reference_level / self.gain
+        candidate_integral = float(np.clip(self.integral + self.ki * error * dt, -.25, .25))
+        upper = min(self.max_volts, max(self.initial_volts, self.drive_rms * np.exp(np.log(1.5) * dt)))
+        proposed = feedforward * np.exp(np.clip(self.kp * error + candidate_integral, -2., 2.))
+        # Freeze integration when an actuator/rate limit would accumulate more
+        # error in the blocked direction. Negative error can unwind immediately.
+        if not ((error > 0 and (limited or proposed > upper)) or (error < 0 and proposed <= 0)):
+            self.integral = candidate_integral
+        proposed = feedforward * np.exp(np.clip(self.kp * error + self.integral, -2., 2.))
+        self.drive_rms = float(np.clip(proposed, 0., upper))
+        self.command_level = self.reference_level
 
 
 def create_bandpass_filter(f1, f2, fs, numtaps=1025):

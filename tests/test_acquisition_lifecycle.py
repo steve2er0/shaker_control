@@ -21,7 +21,7 @@ def test_requested_clock_routing_and_finite_io(window,monkeypatch,fail_shared_cl
             self.ai_channels = SimpleNamespace(add_ai_accel_chan=lambda **kwargs: SimpleNamespace())
             self.ao_channels = SimpleNamespace(add_ao_voltage_chan=lambda **kwargs: None)
             self.timing = SimpleNamespace(cfg_samp_clk_timing=lambda **kwargs: None,samp_clk_term='/Fixture/ai/SampleClock')
-            self.in_stream = SimpleNamespace(input_buf_size=0)
+            self.in_stream = SimpleNamespace(input_buf_size=0, avail_samp_per_chan=0)
             self.out_stream = SimpleNamespace(output_buf_size=0)
             self.triggers = SimpleNamespace(start_trigger=SimpleNamespace(term='/Fixture/ai/StartTrigger',cfg_dig_edge_start_trig=configure_trigger))
             tasks.append(self)
@@ -60,6 +60,7 @@ def test_requested_clock_routing_and_finite_io(window,monkeypatch,fail_shared_cl
         'AcquisitionType':['CONTINUOUS'], 'TerminalConfiguration':['PSEUDO_DIFF'],
         'ExcitationSource':['INTERNAL','NONE'], 'AccelUnits':['G'], 'Coupling':['AC'],
         'VoltageUnits':['VOLTS'], 'AccelSensitivityUnits':['MILLIVOLTS_PER_G'],
+        'RegenerationMode':['DONT_ALLOW_REGENERATION'],
     }.items():
         monkeypatch.setattr(app,name,SimpleNamespace(**{value:value for value in values}),raising=False)
     window.backend_combo.setCurrentIndex(0)
@@ -71,6 +72,7 @@ def test_requested_clock_routing_and_finite_io(window,monkeypatch,fail_shared_cl
         window.stop_controller()
     wait_until(lambda: window.last_report is not None and not window.busy)
     assert len(tasks) == 2
+    assert tasks[1].out_stream.regen_mode == 'DONT_ALLOW_REGENERATION'
     assert all(task.closed and not task.started for task in tasks)
     report = window.last_report
     if fail_shared_clock:

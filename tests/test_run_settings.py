@@ -48,6 +48,9 @@ def test_snapshot_is_detached_and_immutable(settings_data):
 def test_hardware_channels_and_simulation_channels_are_derived_consistently(settings_data):
     assert RunSettings.capture(settings_data).num_input_channels == 4
     settings_data['simulation_mode'] = False
+    assert RunSettings.capture(settings_data).num_input_channels == 1
+    settings_data['response_channels'] = [dict(physical_channel=f'Dev1/ai{i}', label=f'Response {i}',
+                                              sensitivity_mv_per_g=100, excitation_amps=.0021) for i in range(1, 4)]
     snapshot = RunSettings.capture(settings_data)
     assert snapshot.num_input_channels == 4
     assert snapshot.input_channel_labels == ('Control Accel', 'Response 1', 'Response 2', 'Response 3')

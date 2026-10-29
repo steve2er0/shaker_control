@@ -1,5 +1,4 @@
 """Multichannel NI contracts using synthetic readers; never drive real hardware."""
-import copy
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -17,7 +16,29 @@ from run_settings import ConfigurationError, RunSettings, parse_response_channel
 @pytest.mark.parametrize('mode', ['random', 'sine_sweep'])
 @pytest.mark.parametrize('fallback', [False, True])
 def test_four_hardware_inputs_reach_plots_recording_and_control(window, monkeypatch, tmp_path, mode, fallback):
-    tasks, reads = [], []
+    tasks, reads, hardware_waits = [], [], []
+    worker_init = app.ControllerWorker.__init__
+    logger_init, logger_close = app.DataLogger.__init__, app.DataLogger.close
+
+    def track_worker(self, *args, **kwargs):
+        worker_init(self, *args, **kwargs)
+        original_wait = self.should_stop.wait
+        def wait(timeout):
+            hardware_waits.append(timeout)
+            return original_wait(timeout)
+        self.should_stop.wait = wait
+
+    def initialize_recording(self, *args, **kwargs):
+        assert tasks and not any(t.started for t in tasks), 'Recording must initialize before hardware starts'
+        logger_init(self, *args, **kwargs)
+
+    def finish_recording(self):
+        assert not any(t.started for t in tasks), 'Hardware must stop before slow recording finalization'
+        logger_close(self)
+
+    monkeypatch.setattr(app.ControllerWorker, '__init__', track_worker)
+    monkeypatch.setattr(app.DataLogger, '__init__', initialize_recording)
+    monkeypatch.setattr(app.DataLogger, 'close', finish_recording)
 
     class FixtureDaqError(Exception):
         pass
@@ -28,7 +49,7 @@ def test_four_hardware_inputs_reach_plots_recording_and_control(window, monkeypa
             self.ai_channels = SimpleNamespace(add_ai_accel_chan=self.accel, add_ai_voltage_chan=self.voltage)
             self.ao_channels = SimpleNamespace(add_ao_voltage_chan=lambda **kwargs: None)
             self.timing = SimpleNamespace(cfg_samp_clk_timing=lambda **kwargs: None)
-            self.in_stream = SimpleNamespace(input_buf_size=0, task=self)
+            self.in_stream = SimpleNamespace(input_buf_size=0, task=self, avail_samp_per_chan=1600)
             self.out_stream = SimpleNamespace(output_buf_size=0)
             tasks.append(self)
 
@@ -77,6 +98,7 @@ def test_four_hardware_inputs_reach_plots_recording_and_control(window, monkeypa
         'AcquisitionType': ['CONTINUOUS'], 'TerminalConfiguration': ['PSEUDO_DIFF'],
         'ExcitationSource': ['INTERNAL', 'NONE'], 'AccelUnits': ['G'], 'Coupling': ['AC'],
         'VoltageUnits': ['VOLTS'], 'AccelSensitivityUnits': ['MILLIVOLTS_PER_G'],
+        'RegenerationMode': ['DONT_ALLOW_REGENERATION'],
     }.items():
         monkeypatch.setattr(app, name, SimpleNamespace(**{v: v for v in values}), raising=False)
 
@@ -104,6 +126,15 @@ def test_four_hardware_inputs_reach_plots_recording_and_control(window, monkeypa
     assert report['latest_metrics']['accel_rms_g'] == pytest.approx(.5 / np.sqrt(2), rel=.01)
     assert all(t.closed and not t.started for t in tasks)
     assert all(timeout > 0 for timeout in reads)
+    assert not hardware_waits, 'Queued hardware data must be drained without simulation pacing delays'
+    diagnostics = report['stream_diagnostics']
+    assert diagnostics['max_input_backlog_samples'] == 1600
+    assert diagnostics['input_buffer_samples_per_channel'] == 128000
+    assert diagnostics['max_read_seconds'] >= 0
+    assert diagnostics['max_write_seconds'] >= 0
+    assert diagnostics['max_record_seconds'] >= 0
+    assert diagnostics['priming_samples'] == 800
+    assert not diagnostics['regeneration_enabled']
     wave = np.sin(2 * np.pi * 200 * np.arange(800) / 8000)
     expected = np.array([.5, 1., 2., 3.])[:, None] * wave
     np.testing.assert_allclose(window.realtime_tab.buffer[:, -800:], expected, atol=1e-12)
@@ -132,6 +163,8 @@ def test_four_hardware_inputs_reach_plots_recording_and_control(window, monkeypa
 ])
 def test_bad_response_setup_is_rejected_before_hardware_opens(settings_data, changes):
     settings_data['simulation_mode'] = False
+    settings_data['response_channels'] = [dict(physical_channel=f'Dev1/ai{i}', label=f'Response {i}',
+                                              sensitivity_mv_per_g=100, excitation_amps=.0021) for i in range(1, 4)]
     settings_data['response_channels'][1].update(changes)
     with pytest.raises(ConfigurationError) as error:
         RunSettings.capture(settings_data)
@@ -139,9 +172,13 @@ def test_bad_response_setup_is_rejected_before_hardware_opens(settings_data, cha
 
 
 def test_response_editor_roundtrip_and_legacy_preset(window, tmp_path, monkeypatch):
-    channels = copy.deepcopy(window.shared_config.response_channels)
-    channels[0]['label'] = 'Response, fixture'
-    assert parse_response_channels(format_response_channels(channels)) == channels
+    channels = [dict(physical_channel='Dev1/ai1', label='Response, fixture',
+                     sensitivity_mv_per_g=100, excitation_amps=.0021)]
+    restored = parse_response_channels(format_response_channels(channels))
+    assert restored[0]['physical_channel'] == channels[0]['physical_channel']
+    assert restored[0]['label'] == channels[0]['label']
+    assert restored[0]['sensitivity_mv_per_g'] == 100
+    assert restored[0]['excitation_amps'] == pytest.approx(.0021)
     source = tmp_path / 'old-preset.json'
     source.write_text(json.dumps({'settings': {'simulation_mode': False}}))
     monkeypatch.setattr(workspace_ui.QFileDialog, 'getOpenFileName', lambda *args: (str(source), 'JSON'))

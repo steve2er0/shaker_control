@@ -170,7 +170,10 @@ class SettingsPanel(QWidget):
         self._spin('max_level_fraction_rate', 'Ramp rate limit', 'control', 0, 200, ' %/s', 1)
         self._spin('kp', 'Proportional gain', 'control', 0, 10, '', 3)
         self._spin('ki', 'Integral gain', 'control', 0, 5, '', 3)
+        self._spin('random_initial_rms_volts', 'Initial identification drive', 'control', .000001, 1, ' V RMS', 6)
         self._note('control', 'Ramp % scales acceleration amplitude; 10% requests 1% of the full target PSD.')
+        self._note('control', 'PI trims normalized RMS error (integral gain per second). The ramp advances after tracking; '
+                   'the initial drive identifies plant gain. Output is held if the sensor cannot resolve that response.')
         self._section('equalizer', 'Random equalizer tuning')
         self._spin('eq_num_bands', 'Bands', 'equalizer', 1, 64, '', integer=True)
         self._spin('eq_adapt_rate', 'Adaptation rate', 'equalizer', 0, 1, '', 3)
@@ -532,6 +535,7 @@ class RunView(QWidget):
         self.psd_plot.setLabel('left', 'PSD', units='g²/Hz')
         self.psd_plot.setLabel('bottom', 'Frequency', units='Hz')
         self.psd_measured_curve = self.psd_plot.plot(pen=pg.mkPen(COLORS[0], width=2), name='Control · averaged')
+        self.psd_current_curve = self.psd_plot.plot(pen=pg.mkPen(COLORS[2], width=1), name='Control · current block')
         neutral = QApplication.palette().text().color()
         target_pen = pg.mkPen(neutral, width=2, style=Qt.DashLine)
         ramp_pen = pg.mkPen(COLORS[3], width=1, style=Qt.DotLine)
@@ -548,7 +552,7 @@ class RunView(QWidget):
         # response must not disappear behind the legend's opaque background.
         self.legend_stack = QStackedWidget()
         for plot, curves in [
-            (self.psd_plot, (self.psd_measured_curve, self.psd_target_curve, self.psd_ramp_curve)),
+            (self.psd_plot, (self.psd_current_curve, self.psd_measured_curve, self.psd_target_curve, self.psd_ramp_curve)),
             (self.sine_plot, (self.sine_measured_curve, self.sine_target_curve, self.sine_ramp_curve)),
         ]:
             labels = []
@@ -601,7 +605,7 @@ class RunView(QWidget):
         self.history.clear()
         self.sine_points.clear()
         self.latest_psd = None
-        for curve in (self.psd_measured_curve,self.psd_target_curve,self.psd_ramp_curve,self.sine_measured_curve,self.sine_target_curve,self.sine_ramp_curve,self.rms_curve,self.level_curve,self.sat_curve,self.plant_gain_curve):
+        for curve in (self.psd_current_curve,self.psd_measured_curve,self.psd_target_curve,self.psd_ramp_curve,self.sine_measured_curve,self.sine_target_curve,self.sine_ramp_curve,self.rms_curve,self.level_curve,self.sat_curve,self.plant_gain_curve):
             curve.clear()
         self.update_eq(None)
         sine = settings.test_mode == 'sine_sweep'
@@ -635,17 +639,20 @@ class RunView(QWidget):
             self.psd_target_curve.setData(f, target)
             self.psd_plot.setXRange(math.log10(self.band[0]), math.log10(self.band[1]), padding=.03)
             frequency_ticks(self.psd_plot, *self.band)
-            self.note_label.setText('10% ramp requests 1% of the full PSD. Random commands have a 0.05 V RMS floor before limiting. Band RMS excludes frequencies outside the target band.')
+            self.note_label.setText('10% ramp requests 1% of the full PSD. Current block is unaveraged; averaging has a 2 s time constant. '
+                                   'The ramp advances after tracking. Band RMS excludes frequencies outside the target band.')
         self._last_level = settings.sine_initial_level if sine else settings.initial_level_fraction
 
     def update_psd(self, packet):
         if self.settings.test_mode != 'random':
+            self.psd_current_curve.clear()
             self.psd_measured_curve.clear()
             self.psd_target_curve.clear()
             self.psd_ramp_curve.clear()
             return
         f, measured, target, averaged = packet
         self.latest_psd = (f, target)
+        set_curve(self.psd_current_curve, f, measured, self.band)
         set_curve(self.psd_measured_curve, f, averaged if averaged is not None else measured, self.band)
         set_curve(self.psd_target_curve, f, target, self.band)
         set_curve(self.psd_ramp_curve, f, target * self._last_level ** 2 if target is not None else None, self.band)
@@ -661,12 +668,17 @@ class RunView(QWidget):
         voltage_note = f'Command {metrics["output_rms_v"]:.3f} V RMS · crest factor {metrics["output_cf"]:.2f}'
         if metrics.get('limiter_active') or metrics.get('clipping_fraction', 0):
             voltage_note += ' · command limiting active'
+        if not sine and not metrics.get('control_feedback_ready', True):
+            voltage_note += ' · identifying response / holding pilot'
+        if metrics.get('input_backlog_seconds', 0) > self.settings.block_seconds:
+            voltage_note += f' · unread input backlog {metrics["input_backlog_seconds"]:.2f} s'
         self.detail_label.setText(f'Elapsed {metrics["elapsed_s"]:.1f} s · {voltage_note}')
         if sine:
             frequency = metrics['frequency_hz']
             self.value_labels['frequency'].setText(f'{frequency:.1f} Hz')
-            old = self.sine_points.get(frequency, (0, 0))
-            self.sine_points[frequency] = (max(old[0], metrics['accel_peak_g']), max(old[1], metrics['target_peak_g']))
+            if frequency > 0:
+                old = self.sine_points.get(frequency, (0, 0))
+                self.sine_points[frequency] = (max(old[0], metrics['accel_peak_g']), max(old[1], metrics['target_peak_g']))
             frequencies = sorted(self.sine_points)
             self.sine_measured_curve.setData(frequencies, [self.sine_points[f][0] for f in frequencies])
             self.sine_ramp_curve.setData(frequencies, [self.sine_points[f][1] for f in frequencies])
@@ -792,7 +804,8 @@ class ChannelView(QWidget):
             for index in range(1,self.num_channels):
                 frequencies, psd = welch(block[index],fs=self.fs,nperseg=self.settings.welch_nperseg)
                 previous = self.psd_averaged[index]
-                psd = psd if previous is None else .1*psd+.9*previous
+                alpha = 1. - math.exp(-self.settings.block_seconds / 2.)
+                psd = psd if previous is None else alpha*psd+(1-alpha)*previous
                 self.psd_averaged[index] = psd
                 mask = (frequencies > 0) & (psd > 0)
                 self.psd_curves[index].setData(frequencies[mask],psd[mask])
@@ -861,6 +874,16 @@ class ResultsView(QWidget):
             f'Recording: {report["log_dir"] or "Disabled or not initialized"}']
         if report['error']:
             lines.insert(1,f'Fault: {report["error"]}')
+        diagnostics = report.get('stream_diagnostics', {})
+        if 'input_buffer_samples_per_channel' in diagnostics:
+            capacity = diagnostics['input_buffer_samples_per_channel'] / settings.fs
+            backlog = diagnostics.get('max_input_backlog_samples', 0) / settings.fs
+            lines.append(f'Input buffer: {capacity:g} s per channel · largest unread backlog {backlog:.3g} s')
+        stages = [(label, diagnostics[key]) for label, key in (
+            ('read', 'max_read_seconds'), ('write', 'max_write_seconds'),
+            ('record', 'max_record_seconds'), ('block loop', 'max_loop_seconds')) if key in diagnostics]
+        if stages:
+            lines.append('Longest operations: ' + ' · '.join(f'{label} {duration:.3g} s' for label, duration in stages))
         self.summary_text.setPlainText('\n\n'.join(lines))
         self.details.setPlainText(json.dumps(report,indent=2,allow_nan=False))
         self.open_button.setEnabled(bool(report['log_dir']))

@@ -15,7 +15,7 @@ from app_paths import resolve_recording_directory
 
 NUMERIC_FIELDS = ('fs', 'block_seconds', 'buf_seconds', 'welch_nperseg',
     'ao_volt_limit', 'max_rms_volts', 'max_crest_factor', 'crest_soft_knee',
-    'rms_limit_headroom', 'kp', 'ki', 'initial_level_fraction',
+    'rms_limit_headroom', 'kp', 'ki', 'initial_level_fraction', 'random_initial_rms_volts',
     'max_level_fraction_rate', 'eq_num_bands', 'eq_adapt_rate', 'eq_smooth_factor',
     'eq_adapt_level_threshold', 'eq_adapt_level_power', 'eq_adapt_min_weight',
     'sine_start_hz', 'sine_end_hz', 'sine_g_level', 'sine_octaves_per_min',
@@ -176,6 +176,8 @@ def validate_settings(values):
         number('max_level_fraction_rate', lower=0)
         number('kp', lower=0)
         number('ki', lower=0)
+        if 'random_initial_rms_volts' in values:
+            number('random_initial_rms_volts', positive=True)
         bands = number('eq_num_bands', lower=1, upper=64)
         if bands != int(bands):
             errors['eq_num_bands'] = 'Band count must be an integer.'
@@ -286,6 +288,7 @@ class RunSettings:
     @classmethod
     def capture(cls, values):
         values = dict(values)
+        values.setdefault('random_initial_rms_volts', .001)
         if not isinstance(values.get('input_channel_labels'), (list, tuple)):
             raise ConfigurationError({'input_channel_labels': 'Channel labels must be a list.'})
         labels = list(values.get('input_channel_labels', []))

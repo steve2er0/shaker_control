@@ -146,9 +146,21 @@ or dark appearance and opens at 1,360 × 860 (minimum 900 × 620).
 ### Random vibration
 
 The controller generates band-limited noise, shapes it through logarithmically
-spaced equalizer bands, estimates response PSD using Welch's method, and adjusts
-the overall level with PI control. It also estimates plant gain from measured
-acceleration versus commanded voltage. Equalizer adaptation is gated by level.
+spaced equalizer bands, and estimates response PSD using Welch's method. Random
+control starts with a zero baseline and a low-level identification drive (1 mV RMS
+by default, editable under **Control**). It holds that pilot if the sensor cannot
+resolve its response above the baseline; initial silence never causes an assumed
+plant gain to decay and drive to escalate blindly.
+
+Once a response is identified, inverse-gain feedforward and a bounded PI trim on
+normalized RMS error adjust voltage. The acceleration ramp is a separate setpoint,
+advancing toward 100% only while tracking within 15% of its current level. Ramp
+growth respects both the requested rate and 20% of the current amplitude per
+second; voltage increases are capped at 50% per second. The integral uses sample
+duration, is bounded, and freezes when further correction would push into voltage
+or rate limits. PI gains now refer to normalized RMS trim, with integral gain in
+1/s, rather than absolute PSD density. The equalizer uses the ramp-scaled target,
+with bounded band adjustments, and pauses during identification or command limiting.
 
 The current default PSD points, in Hz and g²/Hz, are:
 
@@ -163,9 +175,15 @@ TARGET_PSD_POINTS = [
 
 Log-log interpolation and integration give approximately **0.999 g RMS** over
 100–500 Hz. The level fraction scales acceleration amplitude, so a fraction of
-0.1 requests 0.01 times the target PSD. Actual output also depends on the minimum
-drive floor, limiters, and plant response; random mode enforces a 0.05 V RMS
-minimum command before limiting.
+0.1 requests 0.01 times the target PSD. There is no forced 0.05 V RMS drive floor;
+small corrections and zero commands remain possible. Actual response still depends
+on voltage limits, sensor calibration, plant dynamics, and clock/filter delay.
+
+Hardware output regeneration is disabled. One zero block primes the output, and
+queued waveform order associates each response with its nominal applied command,
+instead of the newest command waiting to play. Missed output deadlines fault
+rather than repeating an old drive waveform. This software association does not
+establish physical AI/AO synchronization or remove device filter delay.
 
 ### Sine sweep and calibration
 
@@ -249,8 +267,9 @@ record run files.
 | Hardware AI / AO | `Dev1/ai0` / `Dev1/ao0` |
 | Sensitivity / IEPE excitation | 100 mV/g / 2.1 mA |
 
-The controller acquires `Dev1/ai0` as the control accelerometer and `Dev1/ai1`–
-`Dev1/ai3` as response inputs by default. All four inputs share one AI task and
+The controller starts with `Dev1/ai0` as the control accelerometer. Enable
+`Dev1/ai1`–`Dev1/ai3` as response inputs when their sensors are connected; the
+response list is empty by default. Enabled inputs share one AI task and
 sample clock. Only the first input supplies random-control feedback and sine
 control metrics; the response inputs appear in **Channels** and are recorded in
 the same HDF5 blocks. Sine summaries describe the control input; all response
@@ -260,8 +279,8 @@ Use **Acquisition → Channels / Backend setup** to edit the control input and i
 sensitivity/current. Each response row contains `physical channel, label,
 sensitivity in mV/g, IEPE current in mA`; delete a row to disable that input.
 For example, `Dev1/ai2, Response 2, 200, 0` selects a 200 mV/g sensor with external
-power. The launch defaults use 100 mV/g and 2.1 mA on all four inputs; match these
-to the connected sensors before starting. `RESPONSE_CHANNELS` in `config.py`
+power. The control-input launch defaults use 100 mV/g and 2.1 mA; match these
+to the connected sensor before starting. `RESPONSE_CHANNELS` in `config.py`
 supplies these defaults, and presets retain each channel's settings. Older
 presets without response inputs load with their original single control input.
 
@@ -286,14 +305,17 @@ and crest factor describe the final waveform after both limiters, before the
 controller's separate absolute voltage clip. Peak compression can alter PSD and
 introduce harmonics; it does not guarantee acceleration tracking.
 
-The Response view separates the full PSD target, ramp-adjusted target, and averaged
-control response. Channels uses consistent colors for time and PSD traces.
+The Response view separates the full PSD target, ramp-adjusted target, unaveraged
+current block, and averaged control response. Averaging has a two-second time
+constant based on sample duration; the current-block curve helps distinguish a
+new response from a lingering average. Channels uses consistent colors for time and PSD traces.
 Diagnostics separates acceleration, ramp/clipping percentage, plant gain in g/V,
 and random equalizer amplitude gains into unit-specific plots. Histories use
 elapsed seconds. **AO clipping** counts samples exceeding the peak voltage limit
 before the final clip; it differs from the near-limit fraction used for sine
 backoff. Voltage and crest metrics shown in the workspace describe the command
-after the absolute clip.
+after the absolute clip, associated by nominal queue order with the acquired block.
+They are software command values, not independently measured output voltages.
 
 Each logged GUI run creates a unique timestamped directory containing:
 
@@ -305,11 +327,16 @@ Each logged GUI run creates a unique timestamped directory containing:
 - `settings.json`: the frozen effective setup, including target, channel labels,
   calibration/preset source, backend selection, and recording settings.
 - `run-summary.json`: final outcome/error, effective backend, duration, blocks,
-  last metrics, setup ID, and recording path.
+  last metrics, setup ID, recording path, and stream timing diagnostics. Hardware
+  diagnostics include effective input/output buffer capacities, largest observed
+  unread input backlog, and longest read, write, recording, and block-loop times.
 - `preview_psd.csv`: random-run PSD of the last recorded block, per channel.
 - `sine_summary.csv`: sine-run frequency, measured g-peak, and target g-peak.
 
 CSV summaries and the final run report are written when the logger closes.
+Hardware priming blocks retain their raw samples; sine priming metadata uses
+frequency zero and is excluded from sweep-point summaries. Recording metadata
+identifies the random-control algorithm and the limits of nominal AO/AI association.
 Requested recording failures fault the run instead of silently disabling logging.
 CSV summaries are previews, not a
 whole-run PSD qualification report. Logs and generated calibration tables are
@@ -356,8 +383,8 @@ runner timings are recorded without enforcing desktop timing budgets. The Window
 runner is a server image; actual Windows 11 display scaling and hardware behavior
 still need the [desktop acceptance checks](docs/windows-compatibility.md).
 
-The PI controller currently has no anti-windup mechanism. Random mode reports
-saturation without automatic level backoff; sine mode has saturation backoff.
+Random control uses conditional-integration anti-windup and pauses its ramp when
+limiting or tracking error prevents an increase; sine mode has saturation backoff.
 Controller block I/O uses finite timeouts and Stop remains pending until cleanup
 finishes; driver calls, output behavior, and stop latency still need hardware
 validation. NI acceleration-channel fallback to voltage scaling is reported in
@@ -368,12 +395,23 @@ includes prescribed resonances, noise, delay, and nonlinearity, rather than a
 validated model of a particular shaker. Tracking accuracy, stability, and physical
 protection require separate evidence for the configured equipment and load.
 
+Reproduce the accelerated random-control review with
+`python scripts/review_random_control.py`. It exercises unknown-gain synthetic
+plants and checks tracking, overshoot, and bounded correction. This uses sample
+time with software waits omitted; it is not a wall-time or hardware stability test.
+
 ### Simulation performance
 
 The simulator evaluates its delay history and response-channel IIR filters by
 block, carrying filter state between blocks. Filter coefficients, gains, noise,
 nonlinearity, and the existing delay-register convention are preserved. Random
-and sine workers subtract processing time from their interruptible block wait.
+and sine simulation workers subtract processing time from their interruptible
+block wait. Hardware reads pace acquisition using the device's sample clock,
+without an additional software sleep, so queued blocks can be drained after a
+temporary delay. Recording initializes before hardware starts, and hardware stops
+before recording finalization. Input overflow faults retain the NI error and
+identify the run as incomplete; acquired samples are never silently skipped to
+hide a backlog.
 
 The [default-rate performance review](docs/simulation-performance/validation.json)
 checks 51,200 Hz, one-second blocks, four channels, live Qt plots, and HDF5 recording.

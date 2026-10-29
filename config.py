@@ -13,11 +13,9 @@ AO_VOLT_LIMIT = 1.8         # Absolute max AO voltage magnitude [V]
 
 # ai0 remains the control input; response inputs are acquired in this order.
 # Sensitivity is in mV/g and excitation current is in amps (0 for external power).
-RESPONSE_CHANNELS = [
-    {"physical_channel": "Dev1/ai1", "label": "Response 1", "sensitivity_mv_per_g": 100.0, "excitation_amps": 2.1e-3},
-    {"physical_channel": "Dev1/ai2", "label": "Response 2", "sensitivity_mv_per_g": 100.0, "excitation_amps": 2.1e-3},
-    {"physical_channel": "Dev1/ai3", "label": "Response 3", "sensitivity_mv_per_g": 100.0, "excitation_amps": 2.1e-3},
-]
+RESPONSE_CHANNELS = []  # Enable response inputs in setup when their sensors are connected.
+# Example response entry:
+# {"physical_channel": "Dev1/ai1", "label": "Response 1", "sensitivity_mv_per_g": 100.0, "excitation_amps": 2.1e-3}
 
 # The first label names the hardware control input; simulation uses all labels.
 INPUT_CHANNEL_LABELS = [
@@ -49,8 +47,9 @@ TARGET_PSD_POINTS = [
 # ============= CONTROL PARAMETERS =============
 INITIAL_LEVEL_FRACTION = 0.1    # Start at 10% acceleration amplitude (1% target PSD)
 MAX_LEVEL_FRACTION_RATE = 2   # Max change in level per second
-KP = 0.9                        # Proportional gain
-KI = .06                        # Integral gain
+KP = 0.9                        # Proportional trim on normalized RMS error
+KI = .06                        # Integral trim gain [1/s], with anti-windup
+RANDOM_INITIAL_RMS_VOLTS = 0.001  # Low-level pilot used to measure the random plant gain
 
 # ============= EQUALIZER PARAMETERS =============
 EQ_NUM_BANDS = 36               # Number of frequency bands

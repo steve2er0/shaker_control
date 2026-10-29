@@ -16,6 +16,8 @@ import math
 from threading import Event
 from pathlib import Path
 from datetime import datetime
+from collections import deque
+from dataclasses import dataclass
 from scipy.signal import welch
 try:
     import h5py
@@ -30,7 +32,7 @@ from PySide6.QtCore import Signal, QObject, QThread, Slot
 try:
     import nidaqmx
     from nidaqmx.constants import (AcquisitionType, TerminalConfiguration, ExcitationSource,
-                                   AccelUnits, Coupling, VoltageUnits, AccelSensitivityUnits)
+                                   AccelUnits, Coupling, VoltageUnits, AccelSensitivityUnits, RegenerationMode)
     from nidaqmx.errors import DaqError
     from nidaqmx.stream_writers import AnalogSingleChannelWriter
     from nidaqmx.stream_readers import AnalogSingleChannelReader, AnalogMultiChannelReader
@@ -44,7 +46,8 @@ except ImportError:
 import config
 from app_paths import resolve_recording_directory
 from run_settings import RunSettings
-from rv_controller import MultiBandEqualizer, RandomVibrationController, create_bandpass_filter, make_bandlimited_noise, apply_safety_limiters
+from rv_controller import (MultiBandEqualizer, RandomVibrationController, RandomAmplitudeControl,
+                           create_bandpass_filter, make_bandlimited_noise, apply_safety_limiters)
 from simulation import create_simulation_system
 from sine_sweep import (
     LogSweepStepper,
@@ -52,6 +55,19 @@ from sine_sweep import (
     build_drive_lookup,
     target_g_rms,
 )
+
+
+@dataclass
+class QueuedDrive:
+    waveform: np.ndarray
+    level: float
+    frequency: float | None = None
+    clipping: float = 0.
+    limited: bool = False
+
+    @property
+    def rms(self):
+        return float(np.sqrt(np.mean(self.waveform ** 2)))
 
 
 def create_hardware_input_task(settings):
@@ -152,6 +168,8 @@ class DataLogger:
         self.h5.attrs['fs'] = self.fs
         self.h5.attrs['block_samples'] = self.block_samples
         self.h5.attrs['configured_channels'] = self.config_channels
+        self.h5.attrs['ao_ai_association'] = 'Nominal queued AO block order; independent clocks and filter delay can affect physical alignment'
+        self.h5.attrs['random_control_algorithm'] = 'normalized_rms_feedforward_pi_v2' if mode.startswith('random') else 'not_applicable'
         self.h5.attrs['input_channel_labels'] = json.dumps(list(shared_config.input_channel_labels))
         if not shared_config.simulation_mode:
             self.h5.attrs['input_physical_channels'] = json.dumps(
@@ -243,6 +261,8 @@ class DataLogger:
         self.level_fraction.append(float(level_fraction))
         self.sat_fraction.append(float(sat_frac))
         self.sine_block_values.append((float(freq_hz), float(peak_meas), float(peak_target)))
+        if freq_hz <= 0:  # Priming block: keep raw samples/metadata, not a sweep point.
+            return
         freq_val = float(freq_hz)
         peak_meas_val = float(peak_meas)
         peak_target_val = float(peak_target)
@@ -366,6 +386,7 @@ class SharedConfig(QObject):
         self.max_level_fraction_rate = config.MAX_LEVEL_FRACTION_RATE
         self.kp = config.KP
         self.ki = config.KI
+        self.random_initial_rms_volts = float(getattr(config, 'RANDOM_INITIAL_RMS_VOLTS', .001))
 
         self.sine_initial_level = float(sine_initial_default)
         self.sine_max_level_rate = float(sine_rate_default)
@@ -468,7 +489,57 @@ class ControllerWorker(QThread):
         
         # PSD averaging
         self.psd_averaged = None
-        self.psd_alpha = 0.1  # Exponential averaging factor
+        self.psd_alpha = 1. - math.exp(-self.shared_config.block_seconds / 2.)
+        self.stream_diagnostics = {}
+        self.input_stream = None
+        self._pending_commands = deque()
+
+    def _exchange_block(self, writer, reader, command, simulation_mode, block_samples, timeout):
+        """Associate AI with queued AO order, not the latest future command.
+
+        This accounts for software queue lead. Independent clocks, start skew,
+        and device filter delays still require hardware synchronization validation.
+        """
+        if simulation_mode:
+            writer.write_many_sample(command.waveform)
+        else:
+            self._timed_stream_call('write', writer.write_many_sample, command.waveform, timeout=timeout)
+        self._pending_commands.append(command)
+        shape = (self.shared_config.num_input_channels, block_samples) if self.shared_config.num_input_channels > 1 else block_samples
+        data = np.empty(shape, dtype=np.float64)
+        if simulation_mode:
+            reader.read_many_sample(data, number_of_samples_per_channel=block_samples)
+        else:
+            self._sample_input_backlog()
+            self._timed_stream_call('read', reader.read_many_sample, data,
+                                   number_of_samples_per_channel=block_samples, timeout=timeout)
+            self._sample_input_backlog()
+        return data, self._pending_commands.popleft()
+
+    def _timed_stream_call(self, stage, operation, *args, **kwargs):
+        start = time.perf_counter()
+        try:
+            return operation(*args, **kwargs)
+        finally:
+            key = f'max_{stage}_seconds'
+            self.stream_diagnostics[key] = max(self.stream_diagnostics.get(key, 0.0), time.perf_counter() - start)
+
+    def _sample_input_backlog(self):
+        if self.input_stream is not None:
+            available = int(self.input_stream.avail_samp_per_chan)
+            self.stream_diagnostics['last_input_backlog_samples'] = available
+            self.stream_diagnostics['max_input_backlog_samples'] = max(
+                self.stream_diagnostics.get('max_input_backlog_samples', 0), available)
+
+    def _pace_block(self, simulation_mode, loop_start, block_duration):
+        elapsed = time.perf_counter() - loop_start
+        self.stream_diagnostics['max_loop_seconds'] = max(self.stream_diagnostics.get('max_loop_seconds', 0.0), elapsed)
+        # NI reads already wait for samples. A software sleep prevents draining
+        # queued blocks after disk, GUI, or scheduler delays and accumulates lag.
+        if simulation_mode:
+            remaining = block_duration - elapsed
+            if remaining > 0:
+                self.should_stop.wait(remaining)
     
     def _announce(self, state, message=''):
         self.state_changed.emit({'state': state, 'backend': self.actual_backend,
@@ -480,6 +551,8 @@ class ControllerWorker(QThread):
 
     def _publish_metrics(self, metrics):
         self.blocks += 1
+        if self.input_stream is not None:
+            metrics['input_backlog_seconds'] = self.stream_diagnostics.get('last_input_backlog_samples', 0) / self.shared_config.fs
         metrics['elapsed_s'] = time.monotonic() - self.monotonic_start
         metrics['block_index'] = self.blocks
         self.last_metrics = metrics
@@ -596,6 +669,9 @@ class ControllerWorker(QThread):
                         sample_mode=AcquisitionType.CONTINUOUS,
                         samps_per_chan=buf_samples,
                     )
+                    # Feedback must never replay an obsolete drive waveform.
+                    # A missed generation deadline faults instead of regenerating.
+                    ao_task.out_stream.regen_mode = RegenerationMode.DONT_ALLOW_REGENERATION
                     try:
                         desired_ao_buf = max(buf_samples * 4, ao_task.out_stream.output_buf_size)
                         ao_task.out_stream.output_buf_size = desired_ao_buf
@@ -619,12 +695,6 @@ class ControllerWorker(QThread):
                     reader_class = AnalogMultiChannelReader if self.shared_config.num_input_channels > 1 else AnalogSingleChannelReader
                     ai_reader = reader_class(ai_task.in_stream)
                     ao_writer = AnalogSingleChannelWriter(ao_task.out_stream, auto_start=False)
-
-                    ao_writer.write_many_sample(np.zeros(buf_samples))
-                    ai_task.start()
-                    started_tasks.append(ai_task)
-                    ao_task.start()
-                    started_tasks.append(ao_task)
 
                     plant_gain_g_per_V = 1.0
                     mode_label = "HARDWARE"
@@ -655,6 +725,26 @@ class ControllerWorker(QThread):
                 except Exception as log_err:
                     raise RuntimeError(f'Recording could not start: {log_err}') from log_err
 
+            if self.should_stop.is_set():
+                return
+            if not simulation_mode:
+                # File creation (including redirected/network folders) must
+                # finish before the hardware begins filling the input buffer.
+                priming = QueuedDrive(np.zeros(block_samples), 0.)
+                ao_writer.write_many_sample(priming.waveform)
+                self._pending_commands.append(priming)
+                if self.should_stop.is_set():
+                    return
+                ai_task.start()
+                started_tasks.append(ai_task)
+                ao_task.start()
+                started_tasks.append(ao_task)
+                self.input_stream = ai_task.in_stream
+                self.stream_diagnostics.update(
+                    input_buffer_samples_per_channel=int(ai_task.in_stream.input_buf_size),
+                    output_buffer_samples_per_channel=int(ao_task.out_stream.output_buf_size),
+                    priming_samples=block_samples, regeneration_enabled=False)
+
             self._announce('running', f'{self.actual_backend} run active')
 
             if test_mode.lower() == 'sine_sweep':
@@ -671,8 +761,11 @@ class ControllerWorker(QThread):
                 return
 
             # Control loop variables
-            level_fraction = self.shared_config.initial_level_fraction
             block_duration = block_samples / max(fs, 1e-9)
+            amplitude = RandomAmplitudeControl(controller.a_rms_target,
+                self.shared_config.initial_level_fraction, self.shared_config.max_level_fraction_rate,
+                self.shared_config.kp, self.shared_config.ki, self.shared_config.random_initial_rms_volts,
+                min(self.shared_config.max_rms_volts, self.shared_config.ao_volt_limit))
             io_timeout = max(1.0, block_duration * 2.0 + 0.5)
             adapt_threshold = float(getattr(self.shared_config, 'eq_adapt_level_threshold', 0.4))
             adapt_power = float(max(0.0, getattr(self.shared_config, 'eq_adapt_level_power', 1.0)))
@@ -695,15 +788,7 @@ class ControllerWorker(QThread):
                     drive = drive / np.std(drive)
                 
                 # Calculate target voltage
-                command_level = level_fraction
-                target_rms_block = controller.a_rms_target * command_level
-                volts_block = (target_rms_block / max(plant_gain_g_per_V, 1e-6)) * drive
-                
-                # Apply minimum drive
-                min_drive_rms = 0.05
-                current_rms = np.std(volts_block)
-                if current_rms < min_drive_rms:
-                    volts_block = volts_block * (min_drive_rms / max(current_rms, 1e-12))
+                volts_block = amplitude.drive_rms * drive
                 
                 # Apply safety limiters
                 volts_block, limiter_stats = apply_safety_limiters(
@@ -715,19 +800,11 @@ class ControllerWorker(QThread):
                 volts_block = np.clip(volts_block, -self.shared_config.ao_volt_limit, 
                                     self.shared_config.ao_volt_limit)
                 
-                # Simulate plant response
-                if simulation_mode:
-                    ao_writer.write_many_sample(volts_block)
-                else:
-                    ao_writer.write_many_sample(volts_block, timeout=io_timeout)
-                if self.shared_config.num_input_channels > 1:
-                    data = np.empty((self.shared_config.num_input_channels, block_samples), dtype=np.float64)
-                else:
-                    data = np.empty(block_samples, dtype=np.float64)
-                if simulation_mode:
-                    ai_reader.read_many_sample(data, number_of_samples_per_channel=block_samples)
-                else:
-                    ai_reader.read_many_sample(data, number_of_samples_per_channel=block_samples, timeout=io_timeout)
+                queued = QueuedDrive(volts_block, amplitude.command_level, clipping=clipping_fraction,
+                                     limited=bool(limiter_stats['any_limiting'] or clipping_fraction))
+                data, applied = self._exchange_block(ao_writer, ai_reader, queued, simulation_mode, block_samples, io_timeout)
+                command_level = applied.level
+                clipping_fraction = applied.clipping
 
                 accel_data = scale_input_block(data, volts_to_g_scale)
                 
@@ -739,14 +816,11 @@ class ControllerWorker(QThread):
                 
                 S_avg_meas, S_avg_target, a_rms_meas = metrics
                 
-                # Update plant gain
-                cmd_rms = np.std(volts_block)
-                if cmd_rms > 1e-9:
-                    new_gain = a_rms_meas / cmd_rms
-                    plant_gain_g_per_V = 0.8*plant_gain_g_per_V + 0.2*new_gain
+                amplitude.observe(float(a_rms_meas), applied.rms, command_level, block_duration, applied.limited)
+                plant_gain_g_per_V = amplitude.gain or 0.
                 
                 # Update equalizer
-                level_fraction_clamped = float(np.clip(level_fraction, 0.0, 1.0))
+                level_fraction_clamped = float(np.clip(command_level, 0.0, 1.0))
                 if adapt_threshold >= 1.0:
                     adapt_weight = 1.0 if level_fraction_clamped >= 1.0 else 0.0
                 else:
@@ -757,13 +831,13 @@ class ControllerWorker(QThread):
                 if adapt_weight < adapt_min_weight:
                     adapt_weight = adapt_min_weight
 
-                equalizer.update_gains(f, Pxx, controller.target_psd_func, adapt_weight=adapt_weight)
-                
-                # Update control
-                level_fraction = controller.update_control(S_avg_meas, S_avg_target, level_fraction)
+                if not amplitude.feedback_ready or applied.limited:
+                    adapt_weight = 0.
+                equalizer.update_gains(f, Pxx, lambda frequencies: controller.target_psd_func(frequencies) * command_level ** 2,
+                                      adapt_weight=adapt_weight)
                 
                 # Calculate saturation
-                sat_frac = np.mean(np.abs(volts_block) >= (0.98*self.shared_config.ao_volt_limit))
+                sat_frac = np.mean(np.abs(applied.waveform) >= (0.98*self.shared_config.ao_volt_limit))
                 
                 # Emit data for GUI updates
                 psd_target = controller.target_psd_func(f)
@@ -776,15 +850,16 @@ class ControllerWorker(QThread):
                 
                 self.psd_data_ready.emit((f, Pxx, psd_target, self.psd_averaged))
                 
-                output_rms = float(np.sqrt(np.mean(volts_block ** 2)))
+                output_rms = applied.rms
                 self._publish_metrics({'accel_rms_g': float(a_rms_meas),
                     'target_rms_g': controller.a_rms_target * command_level,
-                    'level_fraction': command_level, 'next_level_fraction': level_fraction,
+                    'level_fraction': command_level, 'next_level_fraction': amplitude.command_level,
                     'saturation_fraction': float(sat_frac), 'clipping_fraction': clipping_fraction,
                     'plant_gain_g_per_v': float(plant_gain_g_per_V),
-                    'output_rms_v': output_rms, 'output_peak_v': float(np.max(np.abs(volts_block))),
-                    'output_cf': float(np.max(np.abs(volts_block)) / output_rms) if output_rms else 0.0,
-                    'limiter_active': bool(limiter_stats['any_limiting'])})
+                    'output_rms_v': output_rms, 'output_peak_v': float(np.max(np.abs(applied.waveform))),
+                    'output_cf': float(np.max(np.abs(applied.waveform)) / output_rms) if output_rms else 0.0,
+                    'queued_output_rms_v': queued.rms, 'control_feedback_ready': amplitude.feedback_ready,
+                    'control_integral': amplitude.integral, 'limiter_active': applied.limited})
                 
                 eq_info = equalizer.get_band_info()
                 self.eq_data_ready.emit((eq_info['centers'], eq_info['gains']))
@@ -793,8 +868,8 @@ class ControllerWorker(QThread):
                 self.realtime_data_ready.emit(np.array(data, copy=True))
 
                 if data_logger:
-                    data_logger.log_random_block(
-                        volts_block,
+                    self._timed_stream_call('record', data_logger.log_random_block,
+                        applied.waveform,
                         np.array(data, copy=True),
                         command_level,
                         sat_frac,
@@ -804,26 +879,20 @@ class ControllerWorker(QThread):
                 if loop_count % 50 == 0:  # Every ~5 seconds
                     print(f"Debug: Emitting data at {current_time:.1f}s, RMS={np.std(accel_data):.4f}")
                 
-                # Processing consumes part of the block's wall-clock budget.
-                # Both backends wait only for the remainder, interruptibly.
-                remaining = block_duration - (time.perf_counter() - loop_start)
-                if remaining > 0:
-                    self.should_stop.wait(remaining)
+                self._pace_block(simulation_mode, loop_start, block_duration)
                 
         except Exception as e:
             cancelled_read = (self.should_stop.is_set() and DaqError is not None
-                              and isinstance(e, DaqError) and e.error_code in (-200284, -200474))
+                              and isinstance(e, DaqError) and getattr(e, 'error_code', None) in (-200284, -200474))
             if not cancelled_read:
                 self.terminal_state = 'fault'
                 self.error_message = str(e)
+                if DaqError is not None and isinstance(e, DaqError) and getattr(e, 'error_code', None) == -200279:
+                    self.error_message = ('Input buffer overflow: acquisition fell behind and samples were lost. '
+                                          'The run is incomplete. See Results for stream timing diagnostics.\n\n' + str(e))
                 self._announce('fault', self.error_message)
         finally:
             cleanup_errors = []
-            if data_logger:
-                try:
-                    data_logger.close()
-                except Exception as error:
-                    cleanup_errors.append(f'Recording finalization failed: {error}')
             for task in (ao_task, ai_task):
                 if task is None:
                     continue
@@ -833,6 +902,12 @@ class ControllerWorker(QThread):
                         operation()
                     except Exception as error:
                         cleanup_errors.append(f'DAQ cleanup: {error}')
+            self.input_stream = None
+            if data_logger:
+                try:
+                    data_logger.close()
+                except Exception as error:
+                    cleanup_errors.append(f'Recording finalization failed: {error}')
             if cleanup_errors:
                 self.terminal_state = 'fault'
                 self.error_message = '; '.join(filter(None, [self.error_message] + cleanup_errors))
@@ -843,6 +918,8 @@ class ControllerWorker(QThread):
                 'started_at': getattr(self, 'started_at', ''),
                 'duration_s': time.monotonic() - getattr(self, 'monotonic_start', time.monotonic()),
                 'blocks': self.blocks, 'latest_metrics': self.last_metrics,
+                'stream_diagnostics': dict(self.stream_diagnostics),
+                'control_algorithm': 'normalized_rms_feedforward_pi_v2' if self.shared_config.test_mode == 'random' else 'sine_drive_table',
                 'settings': self.shared_config.as_dict(), 'config_id': self.shared_config.config_id,
                 'log_dir': str(data_logger.run_dir) if data_logger and data_logger.enabled else None}
             if report['log_dir']:
@@ -939,27 +1016,16 @@ class ControllerWorker(QThread):
                     self.shared_config.ao_volt_limit,
                 )
 
-                if simulation_mode:
-                    ao_writer.write_many_sample(command_block)
-                else:
-                    ao_writer.write_many_sample(command_block, timeout=io_timeout)
-
-                if self.shared_config.num_input_channels > 1:
-                    data = np.empty((self.shared_config.num_input_channels, block_samples), dtype=np.float64)
-                else:
-                    data = np.empty(block_samples, dtype=np.float64)
-
-                if simulation_mode:
-                    ai_reader.read_many_sample(data, number_of_samples_per_channel=block_samples)
-                else:
-                    ai_reader.read_many_sample(
-                        data,
-                        number_of_samples_per_channel=block_samples,
-                        timeout=io_timeout,
-                    )
+                queued = QueuedDrive(command_block, command_level, frequency=freq, clipping=clipping_fraction,
+                                     limited=bool(limiter_stats['any_limiting'] or clipping_fraction))
+                data, applied = self._exchange_block(ao_writer, ai_reader, queued, simulation_mode, block_samples, io_timeout)
+                command_level = applied.level
+                target_peak_g_current = target_g_peak * command_level
+                applied_freq = applied.frequency or 0.
+                clipping_fraction = applied.clipping
 
                 accel_data = scale_input_block(data, volts_to_g_scale)
-                cmd_rms = float(np.std(command_block))
+                cmd_rms = applied.rms
                 meas_rms = float(np.std(accel_data))
                 meas_peak = meas_rms * math.sqrt(2.0)
                 a_rms_meas = meas_rms
@@ -975,7 +1041,7 @@ class ControllerWorker(QThread):
                     level_fraction = min(1.0, level_fraction + max_level_rate * dt)
 
                 sat_frac = float(
-                    np.mean(np.abs(command_block) >= (0.98 * self.shared_config.ao_volt_limit))
+                    np.mean(np.abs(applied.waveform) >= (0.98 * self.shared_config.ao_volt_limit))
                 )
                 if sat_frac > 0.2:
                     level_fraction = max(0.0, level_fraction * 0.9)
@@ -994,39 +1060,39 @@ class ControllerWorker(QThread):
                     )
 
                 self.psd_data_ready.emit((f, Pxx, None, self.psd_averaged))
-                output_rms = float(np.sqrt(np.mean(command_block ** 2)))
-                progress = (abs(math.log(freq / start_hz) / math.log(end_hz / start_hz)) if start_hz != end_hz else 1.0)
+                output_rms = applied.rms
+                progress = (abs(math.log(applied_freq / start_hz) / math.log(end_hz / start_hz))
+                            if applied_freq > 0 and start_hz != end_hz else 1.0 if applied_freq > 0 else 0.)
                 self._publish_metrics({'accel_rms_g': a_rms_meas,
                     'accel_peak_g': meas_peak, 'target_peak_g': target_peak_g_current,
                     'target_rms_g': target_peak_g_current / math.sqrt(2),
-                    'frequency_hz': freq, 'sweep_progress': min(1.0, progress),
+                    'frequency_hz': applied_freq, 'sweep_progress': min(1.0, progress),
                     'level_fraction': command_level, 'next_level_fraction': level_fraction,
                     'saturation_fraction': sat_frac, 'clipping_fraction': clipping_fraction,
                     'plant_gain_g_per_v': plant_gain,
-                    'output_rms_v': output_rms, 'output_peak_v': float(np.max(np.abs(command_block))),
-                    'output_cf': float(np.max(np.abs(command_block)) / output_rms) if output_rms else 0.0,
-                    'limiter_active': bool(limiter_stats['any_limiting'])})
+                    'output_rms_v': output_rms, 'output_peak_v': float(np.max(np.abs(applied.waveform))),
+                    'output_cf': float(np.max(np.abs(applied.waveform)) / output_rms) if output_rms else 0.0,
+                    'limiter_active': applied.limited})
                 self.realtime_data_ready.emit(np.array(data, copy=True))
 
                 if data_logger:
-                    data_logger.log_sine_block(
-                        command_block,
+                    self._timed_stream_call('record', data_logger.log_sine_block,
+                        applied.waveform,
                         np.array(data, copy=True),
                         command_level,
                         sat_frac,
-                        freq,
+                        applied_freq,
                         meas_peak,
                         target_peak_g_current,
                     )
 
-                dwell_remaining -= block_duration
+                if applied_freq == freq:
+                    dwell_remaining -= block_duration
 
                 if getattr(config, 'CONSOLE_UPDATE_INTERVAL', 5.0) > 0:
                     pass  # optional additional logging removed for simplicity
 
-                remaining = block_duration - (time.perf_counter() - loop_start)
-                if remaining > 0:
-                    self.should_stop.wait(remaining)
+                self._pace_block(simulation_mode, loop_start, block_duration)
 
             first_step = False
             if not stepper.advance():
