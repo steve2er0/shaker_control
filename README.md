@@ -402,6 +402,29 @@ Reproduce the accelerated random-control review with
 plants and checks tracking, overshoot, and bounded correction. This uses sample
 time with software waits omitted; it is not a wall-time or hardware stability test.
 
+### Five-minute hardware hold
+
+On October 29, 2026, the NI USB-4431 completed a 300-second full-target random
+vibration hold after 21 seconds of startup and ramp. Only the control
+accelerometer on `Dev1/ai0` was connected, with 10 mV/g sensitivity and 2.1 mA
+IEPE excitation. The 100–500 Hz profile targeted **3.15927 g RMS**, using
+`Kp = 0.3` and `Ki = 0.06`.
+
+The hold averaged **3.16082 g RMS** (+0.049%), ranging from **3.06767 to
+3.24770 g RMS**. All 300 one-second measurements stayed within **±2.90%** of
+target, passing the ±5% RMS criterion. The run stopped after the hold with no
+reported faults. These results apply to this equipment setup and control-band
+RMS measurement; independent AI/AO clocks were used.
+
+Saved evidence: [chart](docs/hardware-validation/2026-10-29-random-hold/five-minute-hold.png),
+[settings, statistics, and recording hashes](docs/hardware-validation/2026-10-29-random-hold/validation.json),
+[per-block measurements](docs/hardware-validation/2026-10-29-random-hold/per-block-metrics.csv),
+and [final-minute averaged PSD](docs/hardware-validation/2026-10-29-random-hold/final-minute-psd.csv).
+The measurements include startup; `in_hold` marks blocks 22–321 and
+`hold_sample_end_s` counts the 300-second hold. The PSD export includes endpoint
+bins; `interior_bin` marks the bins used for the reported interior PSD statistics.
+Raw waveforms remain in the local recording directory identified in the evidence.
+
 ### Simulation performance
 
 The simulator evaluates its delay history and response-channel IIR filters by

@@ -1,0 +1,194 @@
+{
+  "schema_version": 1,
+  "description": "Five-minute random-vibration hardware hold, preceded by startup and ramp.",
+  "recorded_started_at": "2026-10-29T16:06:20.535353-04:00",
+  "timezone": "America/New_York",
+  "source_commit": "a9fcc4a945e04a7b726605f824c55dcda6916eec",
+  "source_sha256": {
+    "app.py": "935594578ee13252ccd83e985a63be6f6712eb4a819d26840eba569f89f6178f",
+    "config.py": "673b238f9bbb513df569b4d9cc171aa4d30197dfef6994b6588ae0e9134e9800",
+    "rv_controller.py": "f48726da022b6bb4354fdce8bf5472b68ff77ebfcd48a5e8961cc744e9e8196c",
+    "run_settings.py": "d3226db80fd84173ea9728d06e50e3d8fef172b2e08e5d5c5e0174e2fd387245",
+    "workspace_ui.py": "27c3a5bc206f4d16c3b8db589cefe394494491075f0e6d6f8cdfae98b22e7496"
+  },
+  "environment": {
+    "system": "Windows-11-10.0.22631-SP0",
+    "architecture": "AMD64",
+    "python": "3.13.15",
+    "packages": {
+      "numpy": "2.2.6",
+      "scipy": "1.15.3",
+      "PySide6": "6.9.2",
+      "pyqtgraph": "0.13.7",
+      "h5py": "3.14.0",
+      "nidaqmx": "1.2.0"
+    },
+    "nidaqmx_driver": "18.5.0"
+  },
+  "hardware": {
+    "model": "NI USB-4431",
+    "simulated": false,
+    "input_channels": [
+      "Dev1/ai0"
+    ],
+    "output_channel": "Dev1/ao0"
+  },
+  "settings": {
+    "test_mode": "random",
+    "simulation_mode": false,
+    "fs": 51200.0,
+    "block_seconds": 1.0,
+    "buf_seconds": 4.0,
+    "welch_nperseg": 4096,
+    "target_psd_points": [
+      [
+        100.0,
+        0.01
+      ],
+      [
+        300.0,
+        0.04
+      ],
+      [
+        350.0,
+        0.04
+      ],
+      [
+        500.0,
+        0.01
+      ]
+    ],
+    "device_ai": "Dev1/ai0",
+    "device_ao": "Dev1/ao0",
+    "accel_mv_per_g": 10.0,
+    "accel_excitation_amps": 0.0021000000000000003,
+    "kp": 0.3,
+    "ki": 0.06,
+    "initial_level_fraction": 0.1,
+    "max_level_fraction_rate": 2.0,
+    "random_initial_rms_volts": 0.001,
+    "ao_volt_limit": 1.8,
+    "max_rms_volts": 1.4,
+    "max_crest_factor": 5.0,
+    "crest_soft_knee": 0.8,
+    "rms_limit_headroom": 0.9,
+    "eq_num_bands": 36,
+    "eq_gain_limits": [
+      0.2,
+      10.0
+    ],
+    "eq_adapt_rate": 0.2,
+    "eq_smooth_factor": 0.9,
+    "eq_adapt_level_threshold": 0.4,
+    "eq_adapt_level_power": 1.0,
+    "eq_adapt_min_weight": 0.0,
+    "sync_ao_clock": false,
+    "input_channel_labels": [
+      "Control Accel"
+    ],
+    "response_channels": [],
+    "num_input_channels": 1
+  },
+  "source_config_id": "f07b51afeebc",
+  "control_algorithm": "normalized_rms_feedforward_pi_v2",
+  "input_mode": "Dev1/ai0: Acceleration input in g (2.1 mA IEPE)",
+  "clock_status": "Independent AI/AO clocks configured",
+  "criteria": {
+    "full_target_g_rms": 3.159269594392042,
+    "hold_sample_seconds": 300,
+    "rms_tolerance_percent": 5,
+    "measurement": "Each one-second block: Welch PSD integrated over 100-500 Hz.",
+    "hold_begin": "First block at 100% reference with measured RMS within 5% of full target."
+  },
+  "outcome": "stopped",
+  "error": "",
+  "passed_rms_hold": true,
+  "total_run_seconds": 321.39828860014677,
+  "total_blocks": 321,
+  "hold_first_block_index": 22,
+  "hold_last_block_index": 321,
+  "hold": {
+    "blocks": 300,
+    "sample_seconds": 300.0,
+    "wall_seconds": 300.0127521008253,
+    "mean_g_rms": 3.160821569482966,
+    "std_g_rms": 0.031951899064055975,
+    "min_g_rms": 3.067669113207034,
+    "max_g_rms": 3.2476969346560494,
+    "within_5pct_percent": 100.0,
+    "outside_5pct_blocks": [],
+    "first_minute_mean_g_rms": 3.1662030460830586,
+    "last_minute_mean_g_rms": 3.160540355729479,
+    "mean_error_percent": 0.04912449047332815,
+    "worst_absolute_error_percent": 2.899419579373863,
+    "linear_drift_g_per_minute": -0.00128344481212947,
+    "first_to_last_minute_change_percent_of_target": -0.17924049165134318
+  },
+  "stream_diagnostics": {
+    "input_buffer_samples_per_channel": 819200,
+    "output_buffer_samples_per_channel": 819200,
+    "priming_samples": 51200,
+    "regeneration_enabled": false,
+    "max_write_seconds": 0.0006451010704040527,
+    "last_input_backlog_samples": 0,
+    "max_input_backlog_samples": 843,
+    "max_read_seconds": 0.9808230996131897,
+    "max_record_seconds": 0.025599397718906403,
+    "max_loop_seconds": 1.0349996984004974
+  },
+  "recording_checks": {
+    "blocks": 321,
+    "hold_samples_per_channel": 15360000,
+    "max_record_interval_seconds": 1.017852544784546
+  },
+  "final_minute_interior_psd_error_db": {
+    "min": -0.4163482785264824,
+    "max": 0.28803091179754625,
+    "median_absolute": 0.10757735562317754,
+    "frequency_min_hz": 112.5,
+    "frequency_max_hz": 487.5,
+    "method": "Arithmetic mean of 60 per-block Welch PSDs; endpoint bins excluded from these interior statistics."
+  },
+  "original_recording": {
+    "directory_name": "20261029_160620_773580_405f46_random_vibration",
+    "location": "Original OS Documents/ShakerControl/Runs recording; raw waveforms retained locally.",
+    "files": {
+      "data.h5": {
+        "bytes": 131538816,
+        "sha256": "f380c7334a373eab566fa286e0a5b2ea9ca499244bdc0b72dfd1f4759eca8373"
+      },
+      "settings.json": {
+        "bytes": 2496,
+        "sha256": "5193a4c45fd3c769ee89ef1a81e009344b3ddd4209e53a4318fd5adccb3d8216"
+      },
+      "run-summary.json": {
+        "bytes": 4464,
+        "sha256": "fbeab02b94c22be44b048efa8123ac7392fe4319d268d231d7ba96458f461e1e"
+      },
+      "preview_psd.csv": {
+        "bytes": 45687,
+        "sha256": "a07ffab7af202179a3608b3ca0dadf6ebba743b5c19ba0f954ee993881a42592"
+      }
+    }
+  },
+  "exports": {
+    "per-block-metrics.csv": {
+      "bytes": 71109,
+      "sha256": "18f804d0abcae8a08462ba76bf655ab1fd8b03370da5afe9db816a82a0406dec"
+    },
+    "final-minute-psd.csv": {
+      "bytes": 2191,
+      "sha256": "6e8712200dd8af83b59323e2dde21d4259fe14b7806073e713d45ef42e2e7864"
+    },
+    "five-minute-hold.png": {
+      "bytes": 188629,
+      "sha256": "a5b70e0aabfedad6a0bd30a5a0d9a35d390ea69079fdb568a92b8eec8da5dd7f"
+    }
+  },
+  "scope": [
+    "One control accelerometer at the captured 10 mV/g sensitivity and equipment setup.",
+    "Per-block control-band RMS stability; not instantaneous acceleration-peak limits.",
+    "Independent AI/AO clocks: this hold does not establish synchronization or sensor calibration.",
+    "No conclusion about other fixtures, long-duration operation, or production qualification."
+  ]
+}
