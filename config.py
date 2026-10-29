@@ -11,7 +11,15 @@ ACCEL_MV_PER_G = 100.0      # Accelerometer sensitivity [mV/g]
 ACCEL_EXCITATION_AMPS = 2.1e-3  # IEPE excitation current [A], set 0 for external
 AO_VOLT_LIMIT = 1.8         # Absolute max AO voltage magnitude [V]
 
-# Controller hardware uses the first label; simulation uses all labels.
+# ai0 remains the control input; response inputs are acquired in this order.
+# Sensitivity is in mV/g and excitation current is in amps (0 for external power).
+RESPONSE_CHANNELS = [
+    {"physical_channel": "Dev1/ai1", "label": "Response 1", "sensitivity_mv_per_g": 100.0, "excitation_amps": 2.1e-3},
+    {"physical_channel": "Dev1/ai2", "label": "Response 2", "sensitivity_mv_per_g": 100.0, "excitation_amps": 2.1e-3},
+    {"physical_channel": "Dev1/ai3", "label": "Response 3", "sensitivity_mv_per_g": 100.0, "excitation_amps": 2.1e-3},
+]
+
+# The first label names the hardware control input; simulation uses all labels.
 INPUT_CHANNEL_LABELS = [
     "Control Accel",
     "Response 1",

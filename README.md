@@ -249,9 +249,26 @@ record run files.
 | Hardware AI / AO | `Dev1/ai0` / `Dev1/ao0` |
 | Sensitivity / IEPE excitation | 100 mV/g / 2.1 mA |
 
-The main controller currently acquires one hardware control accelerometer.
-Additional response channels are simulated; the standalone monitor supports
-multiple hardware inputs. AI/AO clock sharing is disabled by default.
+The controller acquires `Dev1/ai0` as the control accelerometer and `Dev1/ai1`–
+`Dev1/ai3` as response inputs by default. All four inputs share one AI task and
+sample clock. Only the first input supplies random-control feedback and sine
+control metrics; the response inputs appear in **Channels** and are recorded in
+the same HDF5 blocks. Sine summaries describe the control input; all response
+waveforms remain available in `data.h5`. AI/AO clock sharing is disabled by default.
+
+Use **Acquisition → Channels / Backend setup** to edit the control input and its
+sensitivity/current. Each response row contains `physical channel, label,
+sensitivity in mV/g, IEPE current in mA`; delete a row to disable that input.
+For example, `Dev1/ai2, Response 2, 200, 0` selects a 200 mV/g sensor with external
+power. The launch defaults use 100 mV/g and 2.1 mA on all four inputs; match these
+to the connected sensors before starting. `RESPONSE_CHANNELS` in `config.py`
+supplies these defaults, and presets retain each channel's settings. Older
+presets without response inputs load with their original single control input.
+
+Channel order, physical names, labels, sensitivities, and excitation settings are
+captured in recording settings; HDF5 also includes ordered channel-label and
+physical-channel attributes. If an acceleration input needs voltage fallback,
+the app scales that channel independently and reports its mode (without IEPE).
 
 ## Limiters and recorded data
 

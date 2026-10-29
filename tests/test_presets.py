@@ -15,7 +15,7 @@ def test_preset_roundtrip_preserves_imported_original_and_simulation_labels(wind
     source_bytes = original.read_bytes()
     window.backend_combo.setCurrentIndex(0)
     assert panel.apply_config()
-    assert window.settings.num_input_channels == 1
+    assert window.settings.num_input_channels == 4
     assert len(window.shared_config.input_channel_labels) == 4
     select_file(monkeypatch,original)
     panel.load_preset()

@@ -287,7 +287,11 @@ class TestBrowser(QFrame):
         entry('calibration', 'Drive calibration', settings.calibration_source or 'Source not specified', 'calibration')
         group('Acquisition')
         for index, label in enumerate(settings.input_channel_labels):
-            detail = ('Synthetic control input' if index == 0 else 'Synthetic response input') if settings.simulation_mode else f'{settings.device_ai} · {settings.accel_mv_per_g:g} mV/g'
+            if settings.simulation_mode:
+                detail = 'Synthetic control input' if index == 0 else 'Synthetic response input'
+            else:
+                spec = settings.hardware_input_channels[index]
+                detail = f'{spec["physical_channel"]} · {spec["sensitivity_mv_per_g"]:g} mV/g · ' + ('Control' if index == 0 else 'Response')
             entry('channel', label, detail, 'activity', index)
         entry('acquisition', 'Sample clock', f'{settings.fs:,.0f} Hz · {settings.block_seconds:g} s blocks', 'clock')
         group('Session runs')
@@ -715,7 +719,9 @@ class FloatingWorkspaceMixin:
             self.show_page(1)
             self.realtime_tab.channel_combo.setCurrentIndex(int(data) + 1)
             label = self.settings.input_channel_labels[int(data)]
-            description = f'{label} · ' + ('synthetic acceleration' if self.settings.simulation_mode else f'{self.settings.device_ai} · hardware control input')
+            spec = None if self.settings.simulation_mode else self.settings.hardware_input_channels[int(data)]
+            description = f'{label} · ' + ('synthetic acceleration' if spec is None else
+                f'{spec["physical_channel"]} · hardware {"control" if int(data) == 0 else "response"} input')
             self.inspect_settings('channel', description)
         elif key == 'report':
             self.results_tab.run_list.setCurrentRow(int(data))

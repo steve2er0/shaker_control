@@ -55,6 +55,7 @@ def test_requested_clock_routing_and_finite_io(window,monkeypatch,fail_shared_cl
     monkeypatch.setattr(app,'NIDAQMX_AVAILABLE',True)
     monkeypatch.setattr(app,'AnalogSingleChannelWriter',Writer,raising=False)
     monkeypatch.setattr(app,'AnalogSingleChannelReader',Reader,raising=False)
+    monkeypatch.setattr(app,'AnalogMultiChannelReader',Reader,raising=False)
     for name,values in {
         'AcquisitionType':['CONTINUOUS'], 'TerminalConfiguration':['PSEUDO_DIFF'],
         'ExcitationSource':['INTERNAL','NONE'], 'AccelUnits':['G'], 'Coupling':['AC'],

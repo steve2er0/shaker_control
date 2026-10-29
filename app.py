@@ -33,7 +33,7 @@ try:
                                    AccelUnits, Coupling, VoltageUnits, AccelSensitivityUnits)
     from nidaqmx.errors import DaqError
     from nidaqmx.stream_writers import AnalogSingleChannelWriter
-    from nidaqmx.stream_readers import AnalogSingleChannelReader
+    from nidaqmx.stream_readers import AnalogSingleChannelReader, AnalogMultiChannelReader
     NIDAQMX_AVAILABLE = True
 except ImportError:
     nidaqmx = None
@@ -52,6 +52,69 @@ from sine_sweep import (
     build_drive_lookup,
     target_g_rms,
 )
+
+
+def create_hardware_input_task(settings):
+    """Configure all inputs, rebuilding the task if an acceleration channel needs voltage scaling.
+
+    A failed channel add may leave a partial channel in NI's task. Rebuilding
+    preserves the exact requested order without duplicate or missing inputs.
+    No task is started here.
+    """
+    channels = settings.hardware_input_channels
+    voltage_channels = set()
+    while True:
+        task = nidaqmx.Task()
+        scales = np.ones(len(channels))
+        modes = []
+        try:
+            for index, spec in enumerate(channels):
+                physical = spec['physical_channel']
+                if index in voltage_channels:
+                    voltage_range = max(2.0, settings.ao_volt_limit * 2.0)
+                    task.ai_channels.add_ai_voltage_chan(
+                        physical_channel=physical, name_to_assign_to_channel=f'accel_{index}',
+                        terminal_config=TerminalConfiguration.PSEUDO_DIFF,
+                        min_val=-voltage_range, max_val=voltage_range, units=VoltageUnits.VOLTS)
+                    scales[index] = 1000.0 / spec['sensitivity_mv_per_g']
+                    modes.append(f'{physical}: Voltage input scaled to g (no IEPE)')
+                    continue
+                current = spec['excitation_amps']
+                try:
+                    channel = task.ai_channels.add_ai_accel_chan(
+                        physical_channel=physical, name_to_assign_to_channel=f'accel_{index}',
+                        terminal_config=TerminalConfiguration.PSEUDO_DIFF, min_val=-5.0, max_val=5.0,
+                        units=AccelUnits.G, sensitivity=spec['sensitivity_mv_per_g'],
+                        sensitivity_units=AccelSensitivityUnits.MILLIVOLTS_PER_G,
+                        current_excit_source=ExcitationSource.INTERNAL if current > 0 else ExcitationSource.NONE,
+                        current_excit_val=current)
+                except Exception as error:
+                    if DaqError is None or not isinstance(error, DaqError):
+                        raise
+                    print(f'{physical}: acceleration channel unavailable: {error}. Using voltage scaling.')
+                    voltage_channels.add(index)
+                    break
+                try:
+                    channel.ai_coupling = Coupling.AC
+                except DaqError:
+                    pass
+                power = f'{current * 1000:g} mA IEPE' if current > 0 else 'external power'
+                modes.append(f'{physical}: Acceleration input in g ({power})')
+            else:
+                return task, scales, '; '.join(modes)
+        except BaseException:
+            task.close()
+            raise
+        task.close()
+
+
+def scale_input_block(data, scales):
+    """Convert every voltage fallback channel to g, retaining channel order."""
+    if scales is not None:
+        data *= np.asarray(scales)[:, None] if data.ndim == 2 else float(np.asarray(scales)[0])
+    if not np.all(np.isfinite(data)):
+        raise RuntimeError('Acquired acceleration contains NaN or infinity')
+    return data[0] if data.ndim == 2 else data
 
 
 class DataLogger:
@@ -89,6 +152,10 @@ class DataLogger:
         self.h5.attrs['fs'] = self.fs
         self.h5.attrs['block_samples'] = self.block_samples
         self.h5.attrs['configured_channels'] = self.config_channels
+        self.h5.attrs['input_channel_labels'] = json.dumps(list(shared_config.input_channel_labels))
+        if not shared_config.simulation_mode:
+            self.h5.attrs['input_physical_channels'] = json.dumps(
+                [spec['physical_channel'] for spec in shared_config.hardware_input_channels])
 
         self.ao_ds = self.h5.create_dataset(
             'ao',
@@ -327,6 +394,7 @@ class SharedConfig(QObject):
         self.device_ai = config.DEVICE_AI
         self.device_ao = config.DEVICE_AO
         self.accel_mv_per_g = config.ACCEL_MV_PER_G
+        self.response_channels = copy.deepcopy(getattr(config, 'RESPONSE_CHANNELS', []))
         self.sim_resonances = list(config.SIM_RESONANCES)
         self.sim_delay_samples = config.SIM_DELAY_SAMPLES
         self.sim_nonlinearity = config.SIM_NONLINEARITY
@@ -341,7 +409,7 @@ class SharedConfig(QObject):
         self.input_channel_labels = list(labels)
         if not self.input_channel_labels:
             self.input_channel_labels = ["Control Accel"]
-        self.num_input_channels = len(self.input_channel_labels) if self.simulation_mode else 1
+        self.num_input_channels = len(self.input_channel_labels) if self.simulation_mode else 1 + len(self.response_channels)
 
         # Real-time viewer tuning
         self.realtime_psd_update_stride = int(getattr(config, "REALTIME_PSD_UPDATE_STRIDE", 5))
@@ -363,7 +431,7 @@ class SharedConfig(QObject):
             if key in values and key != 'revision':
                 setattr(self, key, copy.deepcopy(values[key]))
         self.revision += 1
-        self.num_input_channels = len(self.input_channel_labels) if self.simulation_mode else 1
+        self.num_input_channels = len(self.input_channel_labels) if self.simulation_mode else 1 + len(self.response_channels)
         self.config_updated.emit()
 
 
@@ -496,62 +564,14 @@ class ControllerWorker(QThread):
                 mode_label = "SIMULATION"
             else:
                 try:
-                    device_ai = self.shared_config.device_ai
                     device_ao = self.shared_config.device_ao
-                    accel_mV_per_g = self.shared_config.accel_mv_per_g
                     ao_volt_limit = self.shared_config.ao_volt_limit
                     buf_samples = int(self.shared_config.fs * self.shared_config.buf_seconds)
-                    excitation_current = max(0.0, float(self.shared_config.accel_excitation_amps))
-                    excitation_source = ExcitationSource.INTERNAL if excitation_current > 0 else ExcitationSource.NONE
-
-                    ai_task = nidaqmx.Task()
+                    ai_task, volts_to_g_scale, self.input_mode = create_hardware_input_task(self.shared_config)
                     ao_task = nidaqmx.Task()
-
-                    try:
-                        ai_ch = ai_task.ai_channels.add_ai_accel_chan(
-                            physical_channel=device_ai,
-                            name_to_assign_to_channel="accel",
-                            terminal_config=TerminalConfiguration.PSEUDO_DIFF,
-                            min_val=-5.0,
-                            max_val=5.0,
-                            units=AccelUnits.G,
-                            sensitivity=accel_mV_per_g,
-                            sensitivity_units=AccelSensitivityUnits.MILLIVOLTS_PER_G,
-                            current_excit_source=excitation_source,
-                            current_excit_val=excitation_current,
-                        )
-                        volts_to_g_scale = None
-                        self.input_mode = 'Acceleration input in g'
-                        if excitation_current > 0:
-                            print(f"Hardware input configured for IEPE accelerometer mode ({excitation_current*1000:.2f} mA).")
-                        else:
-                            print("Hardware input configured for accelerometer without IEPE excitation.")
-                        try:
-                            ai_ch.ai_coupling = Coupling.AC
-                        except Exception:
-                            pass
-                    except Exception as accel_err:
-                        if DaqError is not None and not isinstance(accel_err, DaqError):
-                            raise
-                        print(f"Accelerometer channel init failed: {accel_err}. Falling back to voltage mode.")
-                        self.status_message.emit("Accel channel unavailable; using voltage mode")
-                        try:
-                            ai_task.close()
-                        except Exception:
-                            pass
-                        ai_task = nidaqmx.Task()
-                        voltage_range = max(2.0, ao_volt_limit * 2.0)
-                        ai_task.ai_channels.add_ai_voltage_chan(
-                            physical_channel=device_ai,
-                            name_to_assign_to_channel="accel_volts",
-                            terminal_config=TerminalConfiguration.PSEUDO_DIFF,
-                            min_val=-voltage_range,
-                            max_val=voltage_range,
-                            units=VoltageUnits.VOLTS,
-                        )
-                        volts_to_g_scale = 1.0 / max(accel_mV_per_g / 1000.0, 1e-9)
-                        self.input_mode = 'Voltage input scaled to g'
-                        print(f"Scaling voltage input by {volts_to_g_scale:.3f} to convert to g.")
+                    print(self.input_mode)
+                    if np.any(volts_to_g_scale != 1.0) or 'Voltage input' in self.input_mode:
+                        self.status_message.emit('Some inputs use voltage scaling; see Results for input modes.')
 
                     ai_task.timing.cfg_samp_clk_timing(
                         rate=fs,
@@ -596,7 +616,8 @@ class ControllerWorker(QThread):
                         self.clock_status = 'Independent AI/AO clocks configured'
                         print("AO synchronization disabled by configuration; using onboard clock.")
 
-                    ai_reader = AnalogSingleChannelReader(ai_task.in_stream)
+                    reader_class = AnalogMultiChannelReader if self.shared_config.num_input_channels > 1 else AnalogSingleChannelReader
+                    ai_reader = reader_class(ai_task.in_stream)
                     ao_writer = AnalogSingleChannelWriter(ao_task.out_stream, auto_start=False)
 
                     ao_writer.write_many_sample(np.zeros(buf_samples))
@@ -708,19 +729,9 @@ class ControllerWorker(QThread):
                 else:
                     ai_reader.read_many_sample(data, number_of_samples_per_channel=block_samples, timeout=io_timeout)
 
-                if volts_to_g_scale is not None:
-                    if data.ndim == 2:
-                        data[0, :] = data[0, :] * volts_to_g_scale
-                        accel_data = data[0]
-                    else:
-                        data *= volts_to_g_scale
-                        accel_data = data
-                else:
-                    accel_data = data[0] if data.ndim == 2 else data
+                accel_data = scale_input_block(data, volts_to_g_scale)
                 
                 # Estimate PSD
-                if not np.all(np.isfinite(accel_data)):
-                    raise RuntimeError('Acquired acceleration contains NaN or infinity')
                 f, Pxx, metrics = controller.estimate_psd(accel_data)
                 if metrics is None:
                     print(f"Debug: PSD estimation returned None at {time.time() - self.start_time:.1f}s")
@@ -947,18 +958,7 @@ class ControllerWorker(QThread):
                         timeout=io_timeout,
                     )
 
-                if volts_to_g_scale is not None:
-                    if data.ndim == 2:
-                        data[0, :] *= volts_to_g_scale
-                        accel_data = data[0]
-                    else:
-                        data *= volts_to_g_scale
-                        accel_data = data
-                else:
-                    accel_data = data[0] if data.ndim == 2 else data
-
-                if not np.all(np.isfinite(accel_data)):
-                    raise RuntimeError('Acquired acceleration contains NaN or infinity')
+                accel_data = scale_input_block(data, volts_to_g_scale)
                 cmd_rms = float(np.std(command_block))
                 meas_rms = float(np.std(accel_data))
                 meas_peak = meas_rms * math.sqrt(2.0)

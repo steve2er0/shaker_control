@@ -49,8 +49,11 @@ def test_hardware_channels_and_simulation_channels_are_derived_consistently(sett
     assert RunSettings.capture(settings_data).num_input_channels == 4
     settings_data['simulation_mode'] = False
     snapshot = RunSettings.capture(settings_data)
-    assert snapshot.num_input_channels == 1
-    assert snapshot.input_channel_labels == ('Control Accel',)
+    assert snapshot.num_input_channels == 4
+    assert snapshot.input_channel_labels == ('Control Accel', 'Response 1', 'Response 2', 'Response 3')
+    assert [channel['physical_channel'] for channel in snapshot.hardware_input_channels] == [f'Dev1/ai{i}' for i in range(4)]
+    settings_data['response_channels'] = []
+    assert RunSettings.capture(settings_data).num_input_channels == 1
 
 
 def test_zero_pi_gains_and_legal_level_boundaries_are_supported(settings_data):

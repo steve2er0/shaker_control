@@ -4,6 +4,9 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import csv
+import io
+import re
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Mapping
@@ -51,6 +54,31 @@ def format_points(points):
     # Python's shortest round-trip float text preserves imported precision
     # without showing binary representation tails such as 0.0040000000000000001.
     return '\n'.join(f'{float(frequency)}, {float(value)}' for frequency, value in points)
+
+
+def parse_response_channels(text):
+    """Read one explicit channel, label, sensitivity (mV/g), current (mA) per row."""
+    channels = []
+    for line_number, row in enumerate(csv.reader(io.StringIO(text)), 1):
+        if not row or all(not value.strip() for value in row):
+            continue
+        if len(row) != 4:
+            raise ValueError(f'Line {line_number}: enter channel, label, sensitivity in mV/g, and IEPE current in mA.')
+        try:
+            channels.append(dict(physical_channel=row[0].strip(), label=row[1].strip(),
+                                 sensitivity_mv_per_g=float(row[2]), excitation_amps=float(row[3]) / 1000))
+        except ValueError:
+            raise ValueError(f'Line {line_number}: sensitivity and IEPE current must be numbers.') from None
+    return channels
+
+
+def format_response_channels(channels):
+    output = io.StringIO(newline='')
+    writer = csv.writer(output, lineterminator='\n')
+    for channel in channels:
+        writer.writerow([channel['physical_channel'], channel['label'],
+                         float(channel['sensitivity_mv_per_g']), float(channel['excitation_amps']) * 1000])
+    return output.getvalue().rstrip('\n')
 
 
 def _profile_rms(points):
@@ -185,6 +213,8 @@ def validate_settings(values):
         for key in ('device_ai', 'device_ao'):
             if not str(values.get(key, '')).strip():
                 errors[key] = 'Enter the physical DAQ channel.'
+        if not re.fullmatch(r'/?[^/,\s:]+/ai\d+', str(values.get('device_ai', ''))):
+            errors['device_ai'] = 'Enter one explicit control input, for example Dev1/ai0.'
         number('accel_mv_per_g', positive=True)
         number('accel_excitation_amps', lower=0)
     labels = values.get('input_channel_labels', [])
@@ -192,6 +222,28 @@ def validate_settings(values):
         errors['input_channel_labels'] = 'Enter at least one nonempty channel label.'
     if isinstance(labels, (list, tuple)) and len(set(map(str, labels))) != len(labels):
         errors['input_channel_labels'] = 'Channel labels must be unique.'
+    channels = values.get('response_channels', [])
+    try:
+        if not isinstance(channels, (list, tuple)):
+            raise ValueError()
+        physicals = [str(values.get('device_ai', '')).strip().lstrip('/').casefold()]
+        response_labels = [str(labels[0]).strip()] if isinstance(labels, (list, tuple)) and labels else []
+        for channel in channels:
+            physical = channel['physical_channel']
+            label = channel['label']
+            sensitivity, current = float(channel['sensitivity_mv_per_g']), float(channel['excitation_amps'])
+            if (not isinstance(physical, str) or not re.fullmatch(r'/?[^/,\s:]+/ai\d+', physical)
+                    or not isinstance(label, str) or not label.strip()
+                    or not math.isfinite(sensitivity) or sensitivity <= 0
+                    or not math.isfinite(current) or current < 0):
+                raise ValueError()
+            physicals.append(physical.lstrip('/').casefold())
+            response_labels.append(label.strip())
+        if len(set(physicals)) != len(physicals) or len(set(response_labels)) != len(response_labels):
+            raise ValueError()
+    except (KeyError, TypeError, ValueError):
+        errors['response_channels'] = ('Each response needs one explicit ai channel, a unique label, positive sensitivity '
+                                       'and nonnegative IEPE current. Do not repeat the control input or another channel.')
     number('realtime_psd_update_stride', lower=1)
     if mode == 'random':
         number('eq_adapt_level_threshold', lower=0)
@@ -237,8 +289,13 @@ class RunSettings:
         if not isinstance(values.get('input_channel_labels'), (list, tuple)):
             raise ConfigurationError({'input_channel_labels': 'Channel labels must be a list.'})
         labels = list(values.get('input_channel_labels', []))
+        values.setdefault('response_channels', [])
+        # Validate response rows before deriving labels or accessing their keys.
+        response_errors = validate_settings(values)
+        if 'response_channels' in response_errors:
+            raise ConfigurationError({'response_channels': response_errors['response_channels']})
         if not values.get('simulation_mode'):
-            labels = labels[:1]
+            labels = labels[:1] + [channel['label'].strip() for channel in values['response_channels']]
         values['input_channel_labels'] = labels
         values['num_input_channels'] = len(labels)
         errors = validate_settings(values)
@@ -261,6 +318,10 @@ class RunSettings:
                 except (TypeError, ValueError):
                     raise ConfigurationError({key: 'Frequency/value pairs must be finite numbers.'}) from None
         values['input_channel_labels'] = [str(label) for label in labels]
+        values['response_channels'] = [dict(physical_channel=channel['physical_channel'], label=channel['label'].strip(),
+                                           sensitivity_mv_per_g=float(channel['sensitivity_mv_per_g']),
+                                           excitation_amps=float(channel['excitation_amps']))
+                                      for channel in values['response_channels']]
         for key in ('device_ai', 'device_ao', 'data_log_dir', 'calibration_source', 'preset_source'):
             if key in values and not isinstance(values[key], str):
                 raise ConfigurationError({key: 'Must be text.'})
@@ -300,6 +361,13 @@ class RunSettings:
     @property
     def backend(self):
         return 'Simulation' if self.simulation_mode else 'Hardware'
+
+    @property
+    def hardware_input_channels(self):
+        """Ordered physical inputs; only the first is used by the control loop."""
+        return (dict(physical_channel=self.device_ai, label=self.input_channel_labels[0],
+                     sensitivity_mv_per_g=self.accel_mv_per_g, excitation_amps=self.accel_excitation_amps),
+                *self.response_channels)
 
     @property
     def target_rms_g(self):

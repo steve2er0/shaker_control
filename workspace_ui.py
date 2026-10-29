@@ -18,7 +18,8 @@ from PySide6.QtWidgets import (
     QLineEdit, QPlainTextEdit, QScrollArea, QToolButton,
     QStackedWidget, QTabWidget, QFileDialog, QListWidget, QApplication,
 )
-from run_settings import RunSettings, ConfigurationError, validate_settings, parse_points, format_points
+from run_settings import (RunSettings, ConfigurationError, validate_settings, parse_points, format_points,
+                          parse_response_channels, format_response_channels)
 from workspace_shell import (
     FloatingWorkspaceMixin, workspace_colors,
 )
@@ -147,10 +148,13 @@ class SettingsPanel(QWidget):
         self._section('hardware', 'Hardware channels')
         self._text('device_ai', 'Control input', 'hardware')
         self._text('device_ao', 'Drive output', 'hardware')
-        self._spin('accel_mv_per_g', 'Sensitivity', 'hardware', .001, 10000, ' mV/g', 3)
-        self._spin('accel_excitation_amps', 'IEPE current', 'hardware', 0, 100, ' mA', 3)
+        self._spin('accel_mv_per_g', 'Control sensitivity', 'hardware', .001, 10000, ' mV/g', 3)
+        self._spin('accel_excitation_amps', 'Control IEPE current', 'hardware', 0, 100, ' mA', 3)
+        self._text('response_channels', 'Response inputs · channel, label, mV/g, mA', 'hardware', multiline=True)
+        self.fields['response_channels'].setPlaceholderText('Dev1/ai1, Response 1, 100, 2.1')
         self._check('sync_ao_clock', 'Share AI clock with AO', 'hardware')
-        self._note('hardware', 'One hardware control input. Additional response channels are available in the standalone monitor.')
+        self._note('hardware', 'The control input drives feedback. Response inputs are displayed and recorded in row order. '
+                   'Enter one response per line; remove a line to disable that input. Use each sensor’s sensitivity; 0 mA selects external power.')
         self._section('simulation', 'Simulation model')
         self._text('input_channel_labels', 'Channel labels, comma separated', 'simulation')
         self._spin('sim_plant_gain', 'Plant gain', 'simulation', .001, 100, ' g/V', 3)
@@ -287,6 +291,8 @@ class SettingsPanel(QWidget):
             value = values[key]
             if key in ('target_psd_points', 'sine_drive_table'):
                 widget.setPlainText(format_points(value))
+            elif key == 'response_channels':
+                widget.setPlainText(format_response_channels(value))
             elif key == 'input_channel_labels':
                 widget.setText(', '.join(value))
             elif isinstance(widget, QLineEdit):
@@ -383,6 +389,11 @@ class SettingsPanel(QWidget):
                     values[key] = parse_points(widget.toPlainText())
                 except ValueError as error:
                     parse_errors[key] = str(error)
+            elif key == 'response_channels':
+                try:
+                    values[key] = parse_response_channels(widget.toPlainText())
+                except ValueError as error:
+                    parse_errors[key] = str(error)
             elif key == 'input_channel_labels':
                 values[key] = [label.strip() for label in widget.text().split(',') if label.strip()]
             elif isinstance(widget, QLineEdit):
@@ -410,7 +421,7 @@ class SettingsPanel(QWidget):
             label.setText(errors.get(key, ''))
             label.setVisible(key in errors)
             self.fields[key].setAccessibleDescription(errors.get(key, ''))
-        for section, keys in {'target':['target_psd_points'], 'drive':['sine_drive_table'], 'acquisition':['fs','block_seconds','buf_seconds','welch_nperseg'], 'limits':['ao_volt_limit','max_rms_volts','max_crest_factor']}.items():
+        for section, keys in {'target':['target_psd_points'], 'drive':['sine_drive_table'], 'acquisition':['fs','block_seconds','buf_seconds','welch_nperseg'], 'limits':['ao_volt_limit','max_rms_volts','max_crest_factor'], 'hardware':['device_ai','device_ao','accel_mv_per_g','accel_excitation_amps','response_channels']}.items():
             if any(key in errors for key in keys):
                 self.sections[section][1].setChecked(True)
         self.validation_label.setText('\n'.join(dict.fromkeys(errors.values())) if errors else ('Run settings are locked.' if self.locked else 'Setup applied · ready to start.'))
@@ -461,6 +472,9 @@ class SettingsPanel(QWidget):
             if not isinstance(source, dict):
                 raise ValueError('Preset settings must be an object.')
             values.update({key: value for key, value in source.items() if key in values})
+            # Earlier presets selected a single hardware input. Do not enable
+            # newly added inputs when loading their original setup.
+            values['response_channels'] = source.get('response_channels', [])
             values['preset_source'] = str(Path(filename).resolve())
             RunSettings.capture(values)
             self.shared_config.apply_values(values)
@@ -940,7 +954,8 @@ class WorkspaceWindow(FloatingWorkspaceMixin, QMainWindow):
         if dirty and not busy:
             backend = 'Draft backend · apply setup'
         self.backend_label.setText(backend)
-        channel = f'{self.settings.num_input_channels} simulated channel(s)' if self.settings.simulation_mode else self.settings.device_ai
+        channel = (f'{self.settings.num_input_channels} simulated channel(s)' if self.settings.simulation_mode else
+                   ', '.join(spec['physical_channel'] for spec in self.settings.hardware_input_channels))
         recording = (f'Recording {"to" if busy else "saved in"} {self.active_log_dir}' if self.active_log_dir else
                      ('Recording requested · not started' if self.settings.data_log_enabled else 'Recording disabled'))
         self.setup_summary.setText(f'Applied setup: {self.settings.target_summary}  |  {channel}  |  {self.settings.fs:g} Hz · {self.settings.block_seconds:g} s blocks · PSD {self.settings.fs/self.settings.welch_nperseg:g} Hz bins  |  {recording}')
