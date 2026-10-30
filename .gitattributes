@@ -1,3 +1,7 @@
 # Keep Windows entry points native when checked out on either platform.
 *.cmd text eol=crlf
 *.ps1 text eol=crlf
+
+# Validation exports carry byte-level SHA-256 checksums. Preserve their bytes.
+docs/control-features/** -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+docs/hardware-validation/** -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol

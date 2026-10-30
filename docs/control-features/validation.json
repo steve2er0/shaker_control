@@ -1,0 +1,116 @@
+{
+  "schema_version": 1,
+  "simulation_only": true,
+  "real_hardware_tasks_prohibited": true,
+  "source_base_commit": "a0990df41ef41b4180dc08de53030e37be073d53",
+  "source_state": "Uncommitted feature implementation; source hashes identify the reviewed code.",
+  "source_sha256": {
+    "app.py": "74612bcd35bdedf3125171e68e6da1b419a89ec40d6bdcfcafe9b7c4c37e2c19",
+    "config.py": "8f6ab11b6517981cac0f79380765d58a6992b0b9e8eea8709475559ac89b9a48",
+    "run_settings.py": "1ad04232242713c52eeabe002efc9ccf480e88625b753f5b8c00d7035a9ea447",
+    "control_features.py": "2c4ac15af0b8ec4acb2929179a98547f58763f07936132a95f7232f067778941",
+    "run_reports.py": "e4d1e2d4a087e82121d7a4d8dfb43f3f0301539785ebab26757516579f7cc493",
+    "workspace_ui.py": "35688e06cd51d2f50458d114a55b200c1d139818b5bf841d77807a7a96cb3d2d",
+    "calibration_wizard.py": "ce9522746770debb7ecaa88ae75e9e8307bb95f90da2a3c96cc86f4f3df67fa1",
+    "scripts/review_control_features.py": "94cd345dae73dda33b17692418fc0595c0d23a93521976e34c7f667388803897"
+  },
+  "software_validation": {
+    "full_suite_passed": 217,
+    "command": "python -m pytest -q",
+    "additional_ui_checks_passed": 6,
+    "covered": [
+      "Absolute RMS and negative peak limits on all inputs",
+      "Feedback-loss timer in random and sine workers without drive escalation",
+      "Unread-data limit and NI overload flag handling",
+      "Bounded sine convergence with wrong tables, gains 4 and 40, both directions",
+      "Default-rate noisy sine fit and pilot ceiling",
+      "Failure-to-settle deadline",
+      "Partial or faulted runs cannot pass assessment",
+      "Report failure prevents accepting calibration",
+      "Calibration wizard run, cancellation, saved table, coverage and preset application",
+      "HTML/CSV and chart export; fixed-dwell endpoint capture; inspector layout"
+    ]
+  },
+  "simulation_review": {
+    "command": "python scripts/review_control_features.py",
+    "pacing": "Processing waits omitted; sample seconds differ from wall seconds.",
+    "cases": [
+      {
+        "gain_g_per_v": 4.0,
+        "start_hz": 100.0,
+        "end_hz": 500.0,
+        "blocks": 129,
+        "sample_seconds": 12.9,
+        "wall_seconds": 0.49311990290880203,
+        "status": "pass",
+        "frequencies": 8,
+        "worst_settled_window_error_percent": 4.579451186068351,
+        "calibration_status": "pass"
+      },
+      {
+        "gain_g_per_v": 40.0,
+        "start_hz": 100.0,
+        "end_hz": 500.0,
+        "blocks": 82,
+        "sample_seconds": 8.200000000000001,
+        "wall_seconds": 0.305928498506546,
+        "status": "pass",
+        "frequencies": 8,
+        "worst_settled_window_error_percent": 3.6760430892930462,
+        "calibration_status": null
+      },
+      {
+        "gain_g_per_v": 4.0,
+        "start_hz": 500.0,
+        "end_hz": 100.0,
+        "blocks": 129,
+        "sample_seconds": 12.9,
+        "wall_seconds": 0.4913029968738556,
+        "status": "pass",
+        "frequencies": 8,
+        "worst_settled_window_error_percent": 4.607524922179984,
+        "calibration_status": null
+      }
+    ]
+  },
+  "hardware_status": "New feedback, protection, calibration wizard and automatic reports have not been exercised on real NI hardware. Earlier feedforward sine hardware results are separate.",
+  "scope": "Software block checks do not establish independent physical protection or sample-level AI/AO synchronization.",
+  "exports": {
+    "calibration-wizard.png": {
+      "bytes": 44035,
+      "sha256": "5f7dcbc505723e9bbe7f982fbdfbf685a7ff0d182e55719a7ece935fe02aed7a"
+    },
+    "drive-calibration.png": {
+      "bytes": 106963,
+      "sha256": "e6df33fcecbbd088394e3e8fffbae5aa9fdd8b0f851a6de39af7c644bb4e08cb"
+    },
+    "response-protection.png": {
+      "bytes": 108565,
+      "sha256": "01a6db610e1d311bd9151b254ea1de71aa6420500fae1afbb6db3859dfbeb9d9"
+    },
+    "sine-feedback.png": {
+      "bytes": 109567,
+      "sha256": "fa8944569bfea46498b28dd25938e65a4f3038784dcef8bff3c2c5e8e53b2659"
+    },
+    "sample-report/block-metrics.csv": {
+      "bytes": 32206,
+      "sha256": "2a2ef4cbb0c5fdf341574c2a04423c07bfa4cb81bb99769d33f096368275e443"
+    },
+    "sample-report/settled-sine-results.csv": {
+      "bytes": 1333,
+      "sha256": "968e431db3652159b1a4b421be2a6ccdf24bc949a2717a868203c1b5308aa8fc"
+    },
+    "sample-report/test-report.html": {
+      "bytes": 2207,
+      "sha256": "f5f5873d5a57fe82e08a1b8555649e4ae55f957d4785d27ceeeca43bb6932f8e"
+    },
+    "sample-report/test-report.json": {
+      "bytes": 10986,
+      "sha256": "7e9bbc56b37c398b903df693b376836c706061f650e8775b39a1f174e0ee7dd9"
+    },
+    "sample-report/tracking.png": {
+      "bytes": 41709,
+      "sha256": "62dab5ac6f53769f3358b379fdb1af6b359df7ade8a23a1f45c49512d63c6d52"
+    }
+  }
+}

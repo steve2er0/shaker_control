@@ -23,6 +23,7 @@ from run_settings import (RunSettings, ConfigurationError, validate_settings, pa
 from workspace_shell import (
     FloatingWorkspaceMixin, workspace_colors,
 )
+from run_reports import render_report_chart
 
 
 COLORS = ['#287bb5', '#9264ad', '#298a6b', '#b97327', '#bd5673', '#577b85']
@@ -86,6 +87,7 @@ class SettingsPanel(QWidget):
     dirty_changed = Signal(bool)
     discarded = Signal()
     context_changed = Signal(str)
+    calibration_requested = Signal()
 
     def __init__(self, shared_config):
         super().__init__()
@@ -129,13 +131,32 @@ class SettingsPanel(QWidget):
         self._spin('sine_max_level_rate', 'Ramp rate limit', 'sine', 0, 500, ' %/s', 1)
         self._spin('sine_initial_settle', 'Initial settling', 'sine', 0, 30, ' s')
         self._check('sine_repeat', 'Repeat sweep', 'sine')
-        self._section('drive', 'Sine drive table · V peak per 1 g peak')
+        self._section('drive', 'Sine drive calibration')
+        self.calibration_button = QPushButton('Calibration wizard…')
+        self.calibration_button.clicked.connect(self.calibration_requested)
+        self.sections['drive'][2].addRow(self.calibration_button)
+        self._edit_widgets.append(self.calibration_button)
+        self._note('drive', 'Table units: V peak per 1 g peak.')
         self._text('calibration_source', 'Calibration source', 'drive')
         self._text('sine_drive_table', 'Frequency, V peak pairs', 'drive', multiline=True)
         self._spin('sine_default_vpk', 'Default drive', 'drive', 0, 10, ' V peak/g')
         self._spin('sine_drive_scale', 'Drive scale', 'drive', 0, 100, ' ×')
         self._spin('sine_points_per_octave', 'Frequency spacing', 'drive', 1, 100, ' points/octave')
         self._spin('sine_step_dwell', 'Minimum dwell', 'drive', .01, 60, ' s')
+        self._text('calibration_equipment', 'Shaker / fixture / load', 'drive')
+        self._text('calibration_amp_setting', 'Amplifier setting', 'drive')
+        self._text('calibration_sensor_id', 'Control sensor ID', 'drive')
+        self.calibration_range_label = QLabel()
+        self.calibration_range_label.setWordWrap(True)
+        self.sections['drive'][2].addRow(self.calibration_range_label)
+        self._section('sine_feedback', 'Sine amplitude feedback')
+        self._check('sine_closed_loop', 'Enable sine amplitude feedback', 'sine_feedback')
+        self._spin('sine_pilot_vpk', 'Initial pilot ceiling', 'sine_feedback', .000001, 1, ' V peak', 6)
+        self._spin('sine_correction_rate', 'Maximum drive increase', 'sine_feedback', .001, 5, ' fraction/s', 3)
+        self._spin('sine_settle_seconds', 'Settling before assessment', 'sine_feedback', 0, 120, ' s')
+        self._spin('sine_settle_blocks', 'Consecutive tracking blocks', 'sine_feedback', 1, 100, '', integer=True)
+        self._spin('sine_max_step_seconds', 'Maximum settling time', 'sine_feedback', 1, 600, ' s')
+        self._note('sine_feedback', 'Feedback fits the fundamental tone. Dwell extends until full-target tracking settles; failure to settle faults the run.')
 
         self._section('acquisition', 'Acquisition', True)
         self._spin('fs', 'Sample rate', 'acquisition', 1000, 100000, ' Hz')
@@ -165,6 +186,19 @@ class SettingsPanel(QWidget):
         self._spin('ao_volt_limit', 'Absolute peak limit', 'limits', .001, 10, ' V', 3)
         self._spin('max_rms_volts', 'RMS limit', 'limits', 0, 10, ' V RMS', 3)
         self._spin('max_crest_factor', 'Crest-factor limit', 'limits', 1, 10, ' peak/RMS', 2)
+        self._section('response', 'Measured-response protection', True)
+        self._check('response_limits_enabled', 'Enable measured-response stops', 'response')
+        for key, label, maximum, unit, precision in (
+            ('response_max_rms_g', 'All-input broadband RMS limit', 1000, ' g RMS', 3),
+            ('response_max_peak_g', 'All-input raw peak limit', 10000, ' g peak', 3),
+            ('response_target_ratio', 'Control RMS / full target limit', 100, ' ×', 2),
+            ('response_max_backlog_seconds', 'Maximum unread data age', 60, ' s', 3),
+            ('feedback_min_rms_g', 'Minimum control feedback', 10, ' g RMS', 6),
+            ('feedback_min_drive_v', 'Driven-output threshold', 10, ' V RMS', 6),
+            ('feedback_loss_seconds', 'Feedback-loss timeout', 60, ' s', 3),
+            ('feedback_startup_seconds', 'Feedback startup allowance', 60, ' s', 3)):
+            self._spin(key, label, 'response', 0 if key == 'feedback_startup_seconds' else .000001, maximum, unit, precision)
+        self._note('response', 'Checks run on each acquired block. Response limits cover every enabled input; feedback loss uses the control input. Stop latency includes acquisition block time and driver cleanup.')
         self._section('control', 'Random ramp and PI tuning')
         self._spin('initial_level_fraction', 'Ramp start', 'control', 0, 200, ' %', 1)
         self._spin('max_level_fraction_rate', 'Ramp rate limit', 'control', 0, 200, ' %/s', 1)
@@ -181,6 +215,10 @@ class SettingsPanel(QWidget):
         self._section('recording', 'Recording')
         self._check('data_log_enabled', 'Record raw blocks and summaries', 'recording')
         self._text('data_log_dir', 'Output directory', 'recording')
+        self._check('report_enabled', 'Save HTML / CSV test reports', 'recording')
+        self._spin('tracking_tolerance_percent', 'Tracking tolerance', 'recording', .01, 50, ' %', 2)
+        self._spin('report_min_seconds', 'Minimum random assessment time', 'recording', .01, 3600, ' s')
+        self._spin('report_settle_seconds', 'Random settling exclusion', 'recording', 0, 120, ' s')
         self.form_layout.addStretch()
 
         self.validation_label = QLabel()
@@ -248,7 +286,9 @@ class SettingsPanel(QWidget):
         error.hide()
         layout.addWidget(widget)
         layout.addWidget(error)
-        self.sections[section][2].addRow(label, container)
+        heading = QLabel(label)
+        heading.setWordWrap(True)
+        self.sections[section][2].addRow(heading, container)
         self.fields[key], self.error_labels[key] = widget, error
         self.field_sections[key] = section
         widget.setAccessibleName(label or widget.text())
@@ -316,6 +356,10 @@ class SettingsPanel(QWidget):
                 widget.setRange(min(widget.minimum(), value), max(widget.maximum(), value))
                 widget.setValue(value)
         self.sine_unit_combo.setCurrentIndex(1 if values['sine_g_level_is_rms'] else 0)
+        low, high = values['calibration_min_hz'], values['calibration_max_hz']
+        coverage = (f'Tested calibration: {low:g}–{high:g} Hz at {values["calibration_level_peak_g"]:g} g peak · {values["calibration_backend"]}'
+                    if high > 0 else 'Calibration frequency/level coverage has not been recorded.')
+        self.calibration_range_label.setText(coverage)
         self._loading = previous
         self.dirty = False
         self._update_sections()
@@ -333,15 +377,15 @@ class SettingsPanel(QWidget):
     def _update_sections(self):
         sine = self.test_mode == 'sine_sweep'
         contexts = {
-            'target': {'target', 'sine'}, 'calibration': {'drive'},
-            'limits': {'limits', 'control'}, 'equalizer': {'equalizer'},
+            'target': {'target', 'sine', 'sine_feedback'}, 'calibration': {'drive', 'sine_feedback'},
+            'limits': {'limits', 'response', 'control'}, 'equalizer': {'equalizer'},
             'acquisition': {'acquisition'}, 'channel': {'hardware', 'simulation'},
             'simulation': {'simulation'}, 'recording': {'recording'},
         }
         selected = contexts.get(self.context, set(self.sections))
         for key, (wrapper, toggle, form, body) in self.sections.items():
             applicable = not ((key in ('target', 'control', 'equalizer') and sine)
-                             or (key == 'sine' and not sine)
+                             or (key in ('sine', 'sine_feedback') and not sine)
                              or (key == 'hardware' and self.simulation_mode_check.isChecked())
                              or (key == 'simulation' and not self.simulation_mode_check.isChecked()))
             # A drive table can be reviewed before selecting sine mode.
@@ -478,6 +522,7 @@ class SettingsPanel(QWidget):
             # Earlier presets selected a single hardware input. Do not enable
             # newly added inputs when loading their original setup.
             values['response_channels'] = source.get('response_channels', [])
+            values['sine_closed_loop'] = source.get('sine_closed_loop', False)
             values['preset_source'] = str(Path(filename).resolve())
             RunSettings.capture(values)
             self.shared_config.apply_values(values)
@@ -544,7 +589,7 @@ class RunView(QWidget):
         self.sine_plot.setLogMode(x=True)
         self.sine_plot.setLabel('left', 'Acceleration estimate', units='g peak')
         self.sine_plot.setLabel('bottom', 'Frequency', units='Hz')
-        self.sine_measured_curve = self.sine_plot.plot(pen=pg.mkPen(COLORS[0], width=2), symbol='o', symbolSize=5, symbolBrush=COLORS[0], name='Measured · max at frequency')
+        self.sine_measured_curve = self.sine_plot.plot(pen=pg.mkPen(COLORS[0], width=2), symbol='o', symbolSize=5, symbolBrush=COLORS[0], name='Fundamental · latest at frequency')
         self.sine_target_curve = self.sine_plot.plot(pen=target_pen, name='Full target')
         self.sine_ramp_curve = self.sine_plot.plot(pen=ramp_pen, symbol='t', symbolSize=5, name='Ramp target')
         layout.addWidget(self.plot_stack, 1)
@@ -611,10 +656,10 @@ class RunView(QWidget):
         sine = settings.test_mode == 'sine_sweep'
         self.plot_stack.setCurrentIndex(1 if sine else 0)
         self.legend_stack.setCurrentIndex(1 if sine else 0)
-        self.value_titles['accel'].setText('Acceleration · g peak estimate' if sine else 'Control band · g RMS')
+        self.value_titles['accel'].setText('Fundamental · g peak' if sine else 'Control band · g RMS')
         self.value_titles['target'].setText('Full target · g peak' if sine else 'Full target · g RMS')
         self.value_titles['frequency'].parentWidget().setVisible(sine)
-        self.metrics_plot.setLabel('left', 'Acceleration estimate' if sine else 'Band acceleration', units='g peak' if sine else 'g RMS')
+        self.metrics_plot.setLabel('left', 'Fundamental amplitude' if sine else 'Band acceleration', units='g peak' if sine else 'g RMS')
         self.diagnostics_widget.setTabVisible(3, not sine)
         for label in self.value_labels.values():
             label.setText('—')
@@ -630,7 +675,13 @@ class RunView(QWidget):
             frequency_ticks(self.sine_plot, *self.band)
             source = settings.calibration_source or 'Calibration source not recorded'
             drive = 'Drive-table amplitude' if settings.sine_drive_table else 'Default drive amplitude'
-            self.note_label.setText(f'{drive} · no amplitude feedback · {source}. Peak estimate = √2 × block standard deviation; noise and harmonics affect it.')
+            mode = 'Closed-loop fundamental amplitude' if settings.sine_closed_loop else 'Feedforward drive table'
+            coverage = ''
+            if settings.calibration_max_hz and (self.band[0] < settings.calibration_min_hz or self.band[1] > settings.calibration_max_hz
+                    or settings.calibration_backend != settings.backend
+                    or not math.isclose(target, settings.calibration_level_peak_g, rel_tol=.01)):
+                coverage = ' · Requested setup is outside the recorded calibration range/level/backend'
+            self.note_label.setText(f'{mode} · {source}{coverage}. Fitted tone is separate from broadband RMS and raw sample peak.')
         else:
             self.band = [settings.target_psd_points[0][0], settings.target_psd_points[-1][0]]
             f = np.geomspace(*self.band, 256)
@@ -660,7 +711,7 @@ class RunView(QWidget):
     def update_metrics(self, metrics):
         self.history.append(dict(metrics))
         sine = self.settings.test_mode == 'sine_sweep'
-        acceleration = metrics['accel_peak_g'] if sine else metrics['accel_rms_g']
+        acceleration = metrics.get('tone_peak_g', metrics['accel_peak_g']) if sine else metrics['accel_rms_g']
         self.value_labels['accel'].setText(f'{acceleration:.3f}')
         self.value_labels['level'].setText(f'{100 * metrics["level_fraction"]:.1f}%')
         self.value_labels['clip'].setText(f'{100 * metrics.get("clipping_fraction", 0):.2f}%')
@@ -678,16 +729,18 @@ class RunView(QWidget):
             self.value_labels['frequency'].setText(f'{frequency:.1f} Hz')
             if frequency > 0:
                 old = self.sine_points.get(frequency, (0, 0))
-                self.sine_points[frequency] = (max(old[0], metrics['accel_peak_g']), max(old[1], metrics['target_peak_g']))
+                self.sine_points[frequency] = (acceleration, max(old[1], metrics['target_peak_g']))
             frequencies = sorted(self.sine_points)
             self.sine_measured_curve.setData(frequencies, [self.sine_points[f][0] for f in frequencies])
             self.sine_ramp_curve.setData(frequencies, [self.sine_points[f][1] for f in frequencies])
             self.detail_label.setText(f'Frequency progress {100 * metrics["sweep_progress"]:.1f}% · ' + self.detail_label.text())
+            if self.settings.sine_closed_loop:
+                self.detail_label.setText(self.detail_label.text() + (' · tracking settled' if metrics.get('settled') else ' · settling / identifying tone'))
         elif self.latest_psd is not None:
             f, target = self.latest_psd
             set_curve(self.psd_ramp_curve, f, target * self._last_level ** 2 if target is not None else None, self.band)
         times = [item['elapsed_s'] for item in self.history]
-        self.rms_curve.setData(times, [item['accel_peak_g'] if sine else item['accel_rms_g'] for item in self.history])
+        self.rms_curve.setData(times, [item.get('tone_peak_g', item['accel_peak_g']) if sine else item['accel_rms_g'] for item in self.history])
         self.level_curve.setData(times, [item['level_fraction'] * 100 for item in self.history])
         self.sat_curve.setData(times, [item.get('clipping_fraction',0) * 100 for item in self.history])
         self.plant_gain_curve.setData(times, [item['plant_gain_g_per_v'] for item in self.history])
@@ -845,6 +898,10 @@ class ResultsView(QWidget):
         self.open_button.setEnabled(False)
         self.open_button.clicked.connect(self.open_folder)
         layout.addWidget(self.open_button)
+        self.report_button = QPushButton('Open HTML test report')
+        self.report_button.setEnabled(False)
+        self.report_button.clicked.connect(self.open_report)
+        layout.addWidget(self.report_button)
         self.reports = []
 
     def add_report(self, report):
@@ -861,7 +918,9 @@ class ResultsView(QWidget):
         self.summary.setText(f'{report["outcome"].title()} · {backend} · {report["blocks"]} blocks · {report["duration_s"]:.1f} s · setup {report["config_id"]}')
         settings = RunSettings.capture(report['settings'])
         metrics = report.get('latest_metrics') or {}
-        measured = (f'{metrics["accel_peak_g"]:.4g} g peak estimate' if 'accel_peak_g' in metrics else f'{metrics["accel_rms_g"]:.4g} g RMS in the control band' if 'accel_rms_g' in metrics else 'No acquired samples')
+        measured = (f'{metrics["tone_peak_g"]:.4g} g peak fundamental' if 'tone_peak_g' in metrics else
+                    f'{metrics["accel_peak_g"]:.4g} g peak estimate' if 'accel_peak_g' in metrics else
+                    f'{metrics["accel_rms_g"]:.4g} g RMS in the control band' if 'accel_rms_g' in metrics else 'No acquired samples')
         lines = [f'Outcome: {report["outcome"].title()}',f'Backend: {backend}',
             f'Target: {settings.target_summary}',f'Measured (last block): {measured}',
             f'Channels: {", ".join(settings.input_channel_labels)}',
@@ -874,6 +933,16 @@ class ResultsView(QWidget):
             f'Recording: {report["log_dir"] or "Disabled or not initialized"}']
         if report['error']:
             lines.insert(1,f'Fault: {report["error"]}')
+        if 'qualification' in report:
+            q = report['qualification']
+            lines.insert(1, f'Tracking assessment: {q["status"].upper()} · ±{q["tolerance_percent"]:g}% tolerance')
+            lines.append(q['definition'])
+            lines.append(f'Largest acquired sample: {q["maximum_raw_sample_peak_g"]:.5g} g peak')
+            lines.append(f'Test report: {report.get("report_dir") or "Automatic report export disabled"}')
+        if report.get('protection_trip'):
+            lines.append('Measured-response stop: ' + report['protection_trip']['reason'])
+        if report.get('report_plot_error'):
+            lines.append('Report plot unavailable: ' + report['report_plot_error'])
         diagnostics = report.get('stream_diagnostics', {})
         if 'input_buffer_samples_per_channel' in diagnostics:
             capacity = diagnostics['input_buffer_samples_per_channel'] / settings.fs
@@ -887,6 +956,12 @@ class ResultsView(QWidget):
         self.summary_text.setPlainText('\n\n'.join(lines))
         self.details.setPlainText(json.dumps(report,indent=2,allow_nan=False))
         self.open_button.setEnabled(bool(report['log_dir']))
+        self.report_button.setEnabled(bool(report.get('report_dir')))
+
+    def open_report(self):
+        index = self.run_list.currentRow()
+        if 0 <= index < len(self.reports) and self.reports[index].get('report_dir'):
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(Path(self.reports[index]['report_dir']) / 'test-report.html')))
 
     def open_folder(self):
         index = self.run_list.currentRow()
@@ -895,6 +970,7 @@ class ResultsView(QWidget):
 
 
 class WorkspaceWindow(FloatingWorkspaceMixin, QMainWindow):
+    run_completed = Signal(object)
     def __init__(self, shared_config, worker_factory):
         super().__init__()
         self.setWindowTitle('Shaker Control')
@@ -915,6 +991,7 @@ class WorkspaceWindow(FloatingWorkspaceMixin, QMainWindow):
         self.realtime_tab = ChannelView(self.settings)
         self.results_tab = ResultsView()
         self.config_tab = SettingsPanel(shared_config)
+        self.config_tab.calibration_requested.connect(self.open_calibration)
         self._build_floating_workspace()
         self._refresh_controls()
 
@@ -989,18 +1066,21 @@ class WorkspaceWindow(FloatingWorkspaceMixin, QMainWindow):
         self.switch_simulation_button.setEnabled(not busy)
         self._sync_shell_state()
 
-    def start_controller(self):
+    def start_controller(self, snapshot=None):
         if self.busy or self.config_tab.dirty:
             if not self.busy:
                 self.inspect_settings('all')
             return False
         try:
-            snapshot = self.shared_config.snapshot()
+            snapshot = snapshot if isinstance(snapshot, RunSettings) else self.shared_config.snapshot()
         except ConfigurationError as error:
             self.inspect_settings('all')
             self.config_tab.show_errors(error.errors)
             return False
         self.settings = snapshot
+        with QSignalBlocker(self.mode_combo), QSignalBlocker(self.backend_combo):
+            self.mode_combo.setCurrentIndex(1 if snapshot.test_mode == 'sine_sweep' else 0)
+            self.backend_combo.setCurrentIndex(1 if snapshot.simulation_mode else 0)
         self.fault_message = ''
         self.actual_backend = None
         self.active_log_dir = None
@@ -1063,6 +1143,10 @@ class WorkspaceWindow(FloatingWorkspaceMixin, QMainWindow):
         self.notice_label.show()
 
     def _worker_report(self, report):
+        try:
+            render_report_chart(report)
+        except Exception as error:
+            report['report_plot_error'] = str(error)
         self.last_report = report
         self.results_tab.add_report(report)
         self._rebuild_browser()
@@ -1075,6 +1159,15 @@ class WorkspaceWindow(FloatingWorkspaceMixin, QMainWindow):
             self.notice_label.setText(('Sweep complete' if report['outcome'] == 'complete' else 'Run stopped') + ' · review this run in Results.')
             self.notice_label.show()
         self._refresh_controls()
+        self.run_completed.emit(report)
+
+    def open_calibration(self):
+        if self.busy or self.config_tab.dirty:
+            self.config_tab.validation_label.setText('Apply or discard the draft before calibration; calibration requires an idle controller.')
+            return
+        from calibration_wizard import CalibrationWizard
+        self.calibration_dialog = CalibrationWizard(self)
+        self.calibration_dialog.show()
 
     def _thread_finished(self):
         # finished is emitted before the native thread's final teardown. Keep

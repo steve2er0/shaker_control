@@ -1,0 +1,360 @@
+{
+  "outcome": "complete",
+  "backend": "Simulation",
+  "input_mode": "Synthetic acceleration",
+  "clock_status": "Synthetic sample clock",
+  "requested_backend": "Simulation",
+  "error": "",
+  "started_at": "2026-10-29T22:03:03.577122-04:00",
+  "duration_s": 0.49311990290880203,
+  "sample_seconds": 12.9,
+  "blocks": 129,
+  "latest_metrics": {
+    "accel_rms_g": 0.3530317574832336,
+    "accel_peak_g": 0.4992622993811984,
+    "target_peak_g": 0.5,
+    "tone_peak_g": 0.499262280805479,
+    "tone_residual_rms_g": 9.630242026032655e-05,
+    "feedback_ready": true,
+    "settled": true,
+    "target_rms_g": 0.35355339059327373,
+    "frequency_hz": 500.0,
+    "sweep_progress": 1.0,
+    "level_fraction": 1.0,
+    "next_level_fraction": 1.0,
+    "saturation_fraction": 0.0,
+    "clipping_fraction": 0.0,
+    "plant_gain_g_per_v": 4.000274098239693,
+    "output_rms_v": 0.08825646920011446,
+    "output_peak_v": 0.12462067764654909,
+    "output_cf": 1.4120288152926412,
+    "limiter_active": false,
+    "elapsed_s": 0.4873223975300789,
+    "block_index": 129,
+    "raw_peak_g": 0.49873520238559915,
+    "broadband_rms_g": 0.3530317574832336
+  },
+  "stream_diagnostics": {
+    "max_record_seconds": 0.002522297203540802
+  },
+  "control_algorithm": "sine_gain_feedback_v1",
+  "settings": {
+    "revision": 0,
+    "fs": 8000.0,
+    "buf_seconds": 2.0,
+    "block_seconds": 0.1,
+    "welch_nperseg": 512,
+    "target_psd_points": [
+      [
+        100.0,
+        0.001
+      ],
+      [
+        300.0,
+        0.004
+      ],
+      [
+        350.0,
+        0.004
+      ],
+      [
+        500.0,
+        0.001
+      ]
+    ],
+    "test_mode": "sine_sweep",
+    "sine_start_hz": 100.0,
+    "sine_end_hz": 500.0,
+    "sine_g_level": 0.5,
+    "sine_g_level_is_rms": false,
+    "sine_octaves_per_min": 120.0,
+    "sine_repeat": false,
+    "sine_points_per_octave": 3.0,
+    "sine_step_dwell": 0.3,
+    "sine_default_vpk": 0.4,
+    "sine_drive_scale": 1.0,
+    "sine_drive_table": [],
+    "data_log_enabled": true,
+    "data_log_dir": "data_logs",
+    "initial_level_fraction": 0.1,
+    "max_level_fraction_rate": 2.0,
+    "kp": 0.3,
+    "ki": 0.06,
+    "random_initial_rms_volts": 0.001,
+    "sine_initial_level": 0.25,
+    "sine_max_level_rate": 1.0,
+    "sine_initial_settle": 0.2,
+    "eq_num_bands": 8,
+    "eq_adapt_rate": 0.2,
+    "eq_smooth_factor": 0.9,
+    "eq_adapt_level_threshold": 0.4,
+    "eq_adapt_level_power": 1.0,
+    "eq_adapt_min_weight": 0.0,
+    "max_crest_factor": 5.0,
+    "max_rms_volts": 1.4,
+    "ao_volt_limit": 1.8,
+    "accel_excitation_amps": 0.0021,
+    "sync_ao_clock": false,
+    "simulation_mode": true,
+    "sim_plant_gain": 4.0,
+    "sim_noise_level": 0.0001,
+    "device_ai": "Dev1/ai0",
+    "device_ao": "Dev1/ao0",
+    "accel_mv_per_g": 100.0,
+    "response_channels": [],
+    "sim_resonances": [],
+    "sim_delay_samples": 5,
+    "sim_nonlinearity": 0.0,
+    "crest_soft_knee": 0.8,
+    "rms_limit_headroom": 0.9,
+    "eq_gain_limits": [
+      0.2,
+      10.0
+    ],
+    "calibration_source": "Simulation-only feature review; not a hardware calibration.",
+    "preset_source": "",
+    "input_channel_labels": [
+      "Control Accel"
+    ],
+    "num_input_channels": 1,
+    "realtime_psd_update_stride": 5,
+    "response_limits_enabled": true,
+    "response_max_rms_g": 10.0,
+    "response_max_peak_g": 30.0,
+    "response_target_ratio": 2.0,
+    "response_max_backlog_seconds": 2.0,
+    "feedback_min_rms_g": 0.001,
+    "feedback_min_drive_v": 0.0005,
+    "feedback_loss_seconds": 3.0,
+    "feedback_startup_seconds": 3.0,
+    "sine_closed_loop": true,
+    "sine_pilot_vpk": 0.001,
+    "sine_correction_rate": 0.5,
+    "sine_settle_seconds": 0.2,
+    "sine_settle_blocks": 3,
+    "sine_max_step_seconds": 30.0,
+    "tracking_tolerance_percent": 5.0,
+    "report_min_seconds": 10.0,
+    "report_settle_seconds": 2.0,
+    "report_enabled": true,
+    "calibration_run": true,
+    "calibration_equipment": "Synthetic constant-gain plant",
+    "calibration_amp_setting": "Simulation gain parameter",
+    "calibration_sensor_id": "Synthetic control channel",
+    "calibration_min_hz": 0.0,
+    "calibration_max_hz": 0.0,
+    "calibration_level_peak_g": 0.0,
+    "calibration_backend": ""
+  },
+  "config_id": "674955c0110f",
+  "log_dir": null,
+  "protection_trip": null,
+  "qualification": {
+    "tolerance_percent": 5.0,
+    "maximum_raw_sample_peak_g": 0.5003528700979389,
+    "limiting_blocks": 0,
+    "steps": [
+      {
+        "frequency_hz": 100.0,
+        "seconds": 10.09999999999998,
+        "transient_peak_g": 0.5002384401892159,
+        "maximum_sine_equivalent_peak_g": 0.5000160656249707,
+        "status": "pass",
+        "settled_peak_g": 0.4923701584965771,
+        "settled_error_percent": -1.5259683006845917,
+        "worst_settled_error_percent": 4.579451186068351,
+        "target_peak_g": 0.5,
+        "volts_peak_per_g": 0.2499996464147275
+      },
+      {
+        "frequency_hz": 125.99210498948732,
+        "seconds": 0.4,
+        "transient_peak_g": 0.5002800845294484,
+        "maximum_sine_equivalent_peak_g": 0.5017585256711361,
+        "status": "pass",
+        "settled_peak_g": 0.5000388192358877,
+        "settled_error_percent": 0.0077638471775257996,
+        "worst_settled_error_percent": 0.009982430535604436,
+        "target_peak_g": 0.5,
+        "volts_peak_per_g": 0.24999608878248114
+      },
+      {
+        "frequency_hz": 158.74010519681994,
+        "seconds": 0.4,
+        "transient_peak_g": 0.5002885680061112,
+        "maximum_sine_equivalent_peak_g": 0.5018584089302334,
+        "status": "pass",
+        "settled_peak_g": 0.5000912036855726,
+        "settled_error_percent": 0.01824073711450917,
+        "worst_settled_error_percent": 0.02873755121897137,
+        "target_peak_g": 0.5,
+        "volts_peak_per_g": 0.2499951845681204
+      },
+      {
+        "frequency_hz": 200.0,
+        "seconds": 0.4,
+        "transient_peak_g": 0.4997087260971783,
+        "maximum_sine_equivalent_peak_g": 0.49987109104413097,
+        "status": "pass",
+        "settled_peak_g": 0.4996047851645676,
+        "settled_error_percent": -0.0790429670864845,
+        "worst_settled_error_percent": 0.08939418952086386,
+        "target_peak_g": 0.5,
+        "volts_peak_per_g": 0.2497494418524493
+      },
+      {
+        "frequency_hz": 251.98420997897463,
+        "seconds": 0.4,
+        "transient_peak_g": 0.5002733596566438,
+        "maximum_sine_equivalent_peak_g": 0.501576268982858,
+        "status": "pass",
+        "settled_peak_g": 0.5000982075073944,
+        "settled_error_percent": 0.019641501478876815,
+        "worst_settled_error_percent": 0.029392371520997607,
+        "target_peak_g": 0.5,
+        "volts_peak_per_g": 0.2499979645129476
+      },
+      {
+        "frequency_hz": 317.4802103936399,
+        "seconds": 0.4,
+        "transient_peak_g": 0.5003528700979389,
+        "maximum_sine_equivalent_peak_g": 0.5003592853248975,
+        "status": "pass",
+        "settled_peak_g": 0.49986376076739075,
+        "settled_error_percent": -0.02724784652185323,
+        "worst_settled_error_percent": 0.03675087761185747,
+        "target_peak_g": 0.5,
+        "volts_peak_per_g": 0.249976260834013
+      },
+      {
+        "frequency_hz": 400.0,
+        "seconds": 0.4,
+        "transient_peak_g": 0.4956396597570117,
+        "maximum_sine_equivalent_peak_g": 0.5001082934946844,
+        "status": "pass",
+        "settled_peak_g": 0.4954498353632415,
+        "settled_error_percent": -0.9100329273517005,
+        "worst_settled_error_percent": 0.9131461160329923,
+        "target_peak_g": 0.5,
+        "volts_peak_per_g": 0.24775313103156735
+      },
+      {
+        "frequency_hz": 500.0,
+        "seconds": 0.4,
+        "transient_peak_g": 0.4988611028548403,
+        "maximum_sine_equivalent_peak_g": 0.4992900412565382,
+        "status": "pass",
+        "settled_peak_g": 0.49927411070633254,
+        "settled_error_percent": -0.14517785873348435,
+        "worst_settled_error_percent": 0.1475438389041961,
+        "target_peak_g": 0.5,
+        "volts_peak_per_g": 0.24961424749429387
+      }
+    ],
+    "expected_frequency_count": 8,
+    "observed_step_count": 8,
+    "chart": {
+      "x_label": "Frequency (Hz)",
+      "y_label": "Fitted fundamental (g peak)",
+      "points": [
+        [
+          100.0,
+          0.4923701584965771,
+          0.5
+        ],
+        [
+          125.99210498948732,
+          0.5000388192358877,
+          0.5
+        ],
+        [
+          158.74010519681994,
+          0.5000912036855726,
+          0.5
+        ],
+        [
+          200.0,
+          0.4996047851645676,
+          0.5
+        ],
+        [
+          251.98420997897463,
+          0.5000982075073944,
+          0.5
+        ],
+        [
+          317.4802103936399,
+          0.49986376076739075,
+          0.5
+        ],
+        [
+          400.0,
+          0.4954498353632415,
+          0.5
+        ],
+        [
+          500.0,
+          0.49927411070633254,
+          0.5
+        ]
+      ]
+    },
+    "status": "pass",
+    "definition": "Tracking assessment against configured tolerance, separate from run completion. Sine uses the last settling-window blocks at each dwell; transient raw peaks are reported separately. Random excludes startup/ramp and the initial settling interval; all subsequent full-target blocks are evaluated."
+  },
+  "calibration": {
+    "status": "pass",
+    "drive_table": [
+      [
+        100.0,
+        0.2499996464147275
+      ],
+      [
+        125.99210498948732,
+        0.24999608878248114
+      ],
+      [
+        158.74010519681994,
+        0.2499951845681204
+      ],
+      [
+        200.0,
+        0.2497494418524493
+      ],
+      [
+        251.98420997897463,
+        0.2499979645129476
+      ],
+      [
+        317.4802103936399,
+        0.249976260834013
+      ],
+      [
+        400.0,
+        0.24775313103156735
+      ],
+      [
+        500.0,
+        0.24961424749429387
+      ]
+    ],
+    "backend": "Simulation",
+    "equipment": "Synthetic constant-gain plant",
+    "amplifier_setting": "Simulation gain parameter",
+    "sensor_id": "Synthetic control channel",
+    "input_channel": "Dev1/ai0",
+    "output_channel": "Dev1/ao0",
+    "start_hz": 100.0,
+    "end_hz": 500.0,
+    "output_peak_limit_v": 1.8,
+    "output_rms_limit_v": 1.4,
+    "sensitivity_mv_per_g": 100.0,
+    "minimum_hz": 100.0,
+    "maximum_hz": 500.0,
+    "level_peak_g": 0.5,
+    "started_at": "2026-10-29T22:03:03.577122-04:00",
+    "config_id": "674955c0110f"
+  },
+  "report_dir": ".",
+  "public_example_note": "Accelerated simulation; personal directory paths omitted. Original config ID retained for local provenance."
+}

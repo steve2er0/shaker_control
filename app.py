@@ -32,7 +32,7 @@ from PySide6.QtCore import Signal, QObject, QThread, Slot
 try:
     import nidaqmx
     from nidaqmx.constants import (AcquisitionType, TerminalConfiguration, ExcitationSource,
-                                   AccelUnits, Coupling, VoltageUnits, AccelSensitivityUnits, RegenerationMode)
+                                   AccelUnits, Coupling, VoltageUnits, AccelSensitivityUnits, RegenerationMode, AOIdleOutputBehavior)
     from nidaqmx.errors import DaqError
     from nidaqmx.stream_writers import AnalogSingleChannelWriter
     from nidaqmx.stream_readers import AnalogSingleChannelReader, AnalogMultiChannelReader
@@ -40,12 +40,15 @@ try:
 except ImportError:
     nidaqmx = None
     DaqError = None
+    AOIdleOutputBehavior = None
     NIDAQMX_AVAILABLE = False
 
 # Import our existing modules
 import config
 from app_paths import resolve_recording_directory
+from control_features import FEATURE_DEFAULTS, ResponseGuard, ResponseTrip, SineFeedback, measure_tone
 from run_settings import RunSettings
+from run_reports import RunAssessment, ReportFiles
 from rv_controller import (MultiBandEqualizer, RandomVibrationController, RandomAmplitudeControl,
                            create_bandpass_filter, make_bandlimited_noise, apply_safety_limiters)
 from simulation import create_simulation_system
@@ -170,6 +173,8 @@ class DataLogger:
         self.h5.attrs['configured_channels'] = self.config_channels
         self.h5.attrs['ao_ai_association'] = 'Nominal queued AO block order; independent clocks and filter delay can affect physical alignment'
         self.h5.attrs['random_control_algorithm'] = 'normalized_rms_feedforward_pi_v2' if mode.startswith('random') else 'not_applicable'
+        self.h5.attrs['sine_control_algorithm'] = ('sine_gain_feedback_v1' if shared_config.sine_closed_loop else 'sine_drive_table') if mode == 'sine_sweep' else 'not_applicable'
+        self.h5.attrs['sine_peak_estimate_definition'] = 'sqrt(2) times block standard deviation; fitted fundamental is separate in block-metrics.csv'
         self.h5.attrs['input_channel_labels'] = json.dumps(list(shared_config.input_channel_labels))
         if not shared_config.simulation_mode:
             self.h5.attrs['input_physical_channels'] = json.dumps(
@@ -434,6 +439,8 @@ class SharedConfig(QObject):
 
         # Real-time viewer tuning
         self.realtime_psd_update_stride = int(getattr(config, "REALTIME_PSD_UPDATE_STRIDE", 5))
+        for key, default in FEATURE_DEFAULTS.items():
+            setattr(self, key, copy.deepcopy(getattr(config, key.upper(), default)))
         self._fields = tuple(key for key, value in vars(self).items()
                              if not key.startswith('_') and isinstance(value, (str, bool, int, float, list, tuple, dict)))
 
@@ -493,6 +500,13 @@ class ControllerWorker(QThread):
         self.stream_diagnostics = {}
         self.input_stream = None
         self._pending_commands = deque()
+        self.response_guard = ResponseGuard(self.shared_config)
+        self.response_details = {}
+        self.protection_trip = None
+        self.fault_block = None
+        self.input_overload_supported = None
+        self.assessment = RunAssessment(self.shared_config)
+        self.report_files = None
 
     def _exchange_block(self, writer, reader, command, simulation_mode, block_samples, timeout):
         """Associate AI with queued AO order, not the latest future command.
@@ -555,8 +569,34 @@ class ControllerWorker(QThread):
             metrics['input_backlog_seconds'] = self.stream_diagnostics.get('last_input_backlog_samples', 0) / self.shared_config.fs
         metrics['elapsed_s'] = time.monotonic() - self.monotonic_start
         metrics['block_index'] = self.blocks
+        metrics['raw_peak_g'] = max(self.response_details.get('channel_raw_peak_g', [0.]))
+        metrics['broadband_rms_g'] = max(self.response_details.get('channel_rms_g', [0.]))
+        self.assessment.add(metrics)
+        if self.report_files:
+            self.report_files.add(metrics)
         self.last_metrics = metrics
         self.metrics_data_ready.emit(metrics)
+
+    def _check_response(self, data, applied, expected_rms, feedback_rms=None):
+        try:
+            if self.input_stream is not None and self.input_overload_supported is not False:
+                try:
+                    overloaded = self.input_stream.overloaded_chans_exist
+                except (AttributeError, DaqError if DaqError is not None else AttributeError):
+                    self.input_overload_supported = False
+                    self.stream_diagnostics['input_overload_detection'] = 'Not supported by the configured driver/device'
+                else:
+                    self.input_overload_supported = True
+                    self.stream_diagnostics['input_overload_detection'] = 'NI input overload flag checked per block'
+                    if overloaded:
+                        raise ResponseTrip('NI input overload detected; acceleration may be clipped.', {'input_overload': True})
+            self.response_details = self.response_guard.check(data, applied.rms, expected_rms,
+                self.stream_diagnostics.get('last_input_backlog_samples', 0) / self.shared_config.fs,
+                feedback_rms=feedback_rms)
+        except ResponseTrip as error:
+            self.protection_trip = {'reason': str(error), **error.details}
+            self.fault_block = (np.array(data, copy=True), applied.waveform.copy())
+            raise
 
     @Slot()
     def run(self):
@@ -657,13 +697,18 @@ class ControllerWorker(QThread):
                     except Exception:
                         pass
 
-                    ao_task.ao_channels.add_ao_voltage_chan(
+                    output_channel = ao_task.ao_channels.add_ao_voltage_chan(
                         physical_channel=device_ao,
                         name_to_assign_to_channel="drive",
                         min_val=-ao_volt_limit,
                         max_val=ao_volt_limit,
                         units=VoltageUnits.VOLTS,
                     )
+                    try:
+                        output_channel.ao_idle_output_behavior = AOIdleOutputBehavior.ZERO_VOLTS
+                        self.stream_diagnostics['ao_idle_output'] = 'Zero volts requested from NI driver'
+                    except (AttributeError, DaqError if DaqError is not None else AttributeError):
+                        self.stream_diagnostics['ao_idle_output'] = 'Idle-output configuration unsupported; stop behavior requires device validation'
                     ao_task.timing.cfg_samp_clk_timing(
                         rate=fs,
                         sample_mode=AcquisitionType.CONTINUOUS,
@@ -725,6 +770,8 @@ class ControllerWorker(QThread):
                 except Exception as log_err:
                     raise RuntimeError(f'Recording could not start: {log_err}') from log_err
 
+            self.report_files = ReportFiles(self.shared_config,
+                data_logger.run_dir if data_logger and data_logger.enabled else None)
             if self.should_stop.is_set():
                 return
             if not simulation_mode:
@@ -815,6 +862,8 @@ class ControllerWorker(QThread):
                     continue
                 
                 S_avg_meas, S_avg_target, a_rms_meas = metrics
+                self._check_response(data, applied, controller.a_rms_target * command_level,
+                                     feedback_rms=float(a_rms_meas))
                 
                 amplitude.observe(float(a_rms_meas), applied.rms, command_level, block_duration, applied.limited)
                 plant_gain_g_per_V = amplitude.gain or 0.
@@ -903,6 +952,17 @@ class ControllerWorker(QThread):
                     except Exception as error:
                         cleanup_errors.append(f'DAQ cleanup: {error}')
             self.input_stream = None
+            if self.report_files:
+                try:
+                    self.report_files.close()
+                except Exception as error:
+                    cleanup_errors.append(f'Report finalization failed: {error}')
+            if self.fault_block is not None and data_logger and data_logger.enabled:
+                try:
+                    np.savez_compressed(data_logger.run_dir / 'protection-trip-block.npz',
+                                        ai_g=self.fault_block[0], ao_v=self.fault_block[1])
+                except Exception as error:
+                    cleanup_errors.append(f'Protection-trip capture failed: {error}')
             if data_logger:
                 try:
                     data_logger.close()
@@ -917,17 +977,72 @@ class ControllerWorker(QThread):
                 'requested_backend': self.shared_config.backend, 'error': self.error_message,
                 'started_at': getattr(self, 'started_at', ''),
                 'duration_s': time.monotonic() - getattr(self, 'monotonic_start', time.monotonic()),
+                'sample_seconds': self.blocks * self.shared_config.block_seconds,
                 'blocks': self.blocks, 'latest_metrics': self.last_metrics,
                 'stream_diagnostics': dict(self.stream_diagnostics),
-                'control_algorithm': 'normalized_rms_feedforward_pi_v2' if self.shared_config.test_mode == 'random' else 'sine_drive_table',
+                'control_algorithm': ('normalized_rms_feedforward_pi_v2' if self.shared_config.test_mode == 'random'
+                                      else 'sine_gain_feedback_v1' if self.shared_config.sine_closed_loop else 'sine_drive_table'),
                 'settings': self.shared_config.as_dict(), 'config_id': self.shared_config.config_id,
                 'log_dir': str(data_logger.run_dir) if data_logger and data_logger.enabled else None}
+            report['protection_trip'] = self.protection_trip
+            report['qualification'] = self.assessment.finish(report['outcome'], report['error'])
+            if self.fault_block is not None and np.all(np.isfinite(self.fault_block[0])):
+                report['qualification']['maximum_raw_sample_peak_g'] = max(
+                    report['qualification']['maximum_raw_sample_peak_g'], float(np.max(np.abs(self.fault_block[0]))))
+            if self.shared_config.calibration_run:
+                valid = report['qualification']['status'] == 'pass' and report['outcome'] == 'complete'
+                report['calibration'] = {'status': 'pass' if valid else 'fail',
+                    'drive_table': sorted([[row['frequency_hz'], row['volts_peak_per_g']]
+                                          for row in report['qualification'].get('steps', [])]) if valid else [],
+                    'backend': self.actual_backend, 'equipment': self.shared_config.calibration_equipment,
+                    'amplifier_setting': self.shared_config.calibration_amp_setting,
+                    'sensor_id': self.shared_config.calibration_sensor_id,
+                    'input_channel': self.shared_config.device_ai, 'output_channel': self.shared_config.device_ao,
+                    'start_hz': self.shared_config.sine_start_hz, 'end_hz': self.shared_config.sine_end_hz,
+                    'output_peak_limit_v': self.shared_config.ao_volt_limit,
+                    'output_rms_limit_v': self.shared_config.max_rms_volts,
+                    'sensitivity_mv_per_g': self.shared_config.accel_mv_per_g,
+                    'minimum_hz': min(self.shared_config.sine_start_hz, self.shared_config.sine_end_hz),
+                    'maximum_hz': max(self.shared_config.sine_start_hz, self.shared_config.sine_end_hz),
+                    'level_peak_g': self.shared_config.target_rms_g * math.sqrt(2),
+                    'started_at': report['started_at'], 'config_id': report['config_id']}
+            try:
+                if self.report_files:
+                    self.report_files.save(report)
+                    if report.get('calibration') and self.report_files.directory:
+                        (self.report_files.directory / 'calibration.json').write_text(
+                            json.dumps(report['calibration'], indent=2, allow_nan=False) + '\n', encoding='utf-8')
+            except Exception as error:
+                report['outcome'] = self.terminal_state = 'fault'
+                report['error'] = self.error_message = f'{self.error_message} Report could not be saved: {error}'.strip()
+                report['qualification']['status'] = 'fail'
+                if 'calibration' in report:
+                    report['calibration'].update(status='fail', drive_table=[])
+                try:
+                    if self.report_files:
+                        self.report_files.save(report)
+                        if report.get('calibration') and self.report_files.directory:
+                            (self.report_files.directory / 'calibration.json').write_text(
+                                json.dumps(report['calibration'], indent=2, allow_nan=False) + '\n', encoding='utf-8')
+                except Exception:
+                    pass  # The in-memory report retains the export fault.
             if report['log_dir']:
                 try:
                     (Path(report['log_dir']) / 'run-summary.json').write_text(json.dumps(report, indent=2, allow_nan=False) + '\n', encoding='utf-8')
                 except Exception as error:
                     report['outcome'] = self.terminal_state = 'fault'
                     report['error'] = self.error_message = f'{self.error_message} Run summary could not be saved: {error}'.strip()
+                    report['qualification']['status'] = 'fail'
+                    if 'calibration' in report:
+                        report['calibration'].update(status='fail', drive_table=[])
+                    try:
+                        if self.report_files:
+                            self.report_files.save(report)
+                            if report.get('calibration') and self.report_files.directory:
+                                (self.report_files.directory / 'calibration.json').write_text(
+                                    json.dumps(report['calibration'], indent=2, allow_nan=False) + '\n', encoding='utf-8')
+                    except Exception:
+                        pass
             self._announce(self.terminal_state, self.error_message or ('Sweep complete' if self.terminal_state == 'complete' else 'Run stopped'))
             self.report_ready.emit(report)
 
@@ -942,8 +1057,6 @@ class ControllerWorker(QThread):
         block_duration = block_samples / max(fs, 1e-9)
         io_timeout = max(1.0, block_duration * 2.0 + 0.5)
         plant_gain = max(float(plant_gain_initial), 1e-6)
-        last_level_update = time.time()
-        t_last_print = time.time()
 
         points_per_octave = max(1.0, float(self.shared_config.sine_points_per_octave))
         stepper = LogSweepStepper(
@@ -977,29 +1090,44 @@ class ControllerWorker(QThread):
         self.eq_data_ready.emit(None)
         self.psd_averaged = None
         first_step = True
+        feedback = SineFeedback(self.shared_config)
+        closed_loop = self.shared_config.sine_closed_loop
 
         while not self.should_stop.is_set():
             freq = stepper.current_frequency()
             oscillator.set_frequency(freq)
             extra_settle = self.shared_config.sine_initial_settle if first_step else 0.0
             dwell_remaining = dwell_seconds + max(0.0, float(extra_settle))
+            final_step = (not self.shared_config.sine_repeat
+                          and math.isclose(freq, end_hz, rel_tol=1e-12))
+            # Dwell describes the waveform sent to AO. AI can trail it by the
+            # priming queue, so drain that queue once at completion rather than
+            # adding another command block to every frequency step.
+            drain_blocks = len(self._pending_commands) if final_step else 0
+            step_ready = not closed_loop
+            step_seconds = 0.
+            draining_endpoint = False
 
             drive_vpk = max(0.0, lookup_drive(freq) * self.shared_config.sine_drive_scale)
             preview_target_peak_g = target_g_peak * max(level_fraction, 0.0)
             preview_target_vpk = drive_vpk * preview_target_peak_g
 
-            print(
-                f"Sine sweep step: {freq:.1f} Hz, command ~= {preview_target_vpk:.3f} Vpk "
-                f"(target ~= {preview_target_peak_g:.3f} gpk)"
-            )
+            if closed_loop:
+                print(f'Sine sweep step: {freq:.1f} Hz, ramp target {preview_target_peak_g:.3f} g peak; bounded amplitude feedback.')
+            else:
+                print(f'Sine sweep step: {freq:.1f} Hz, command ~= {preview_target_vpk:.3f} V peak (target ~= {preview_target_peak_g:.3f} g peak)')
 
-            while dwell_remaining > 1e-9 and not self.should_stop.is_set():
+            while (dwell_remaining > 1e-9 or drain_blocks or (not step_ready and not draining_endpoint)) and not self.should_stop.is_set():
+                if closed_loop and step_seconds >= self.shared_config.sine_max_step_seconds and not step_ready:
+                    raise RuntimeError(f'Sine could not settle at {freq:g} Hz within {self.shared_config.sine_max_step_seconds:g} seconds.')
                 loop_start = time.perf_counter()
                 sin_block, _ = oscillator.generate(block_samples)
 
                 command_level = level_fraction
                 target_peak_g_current = target_g_peak * max(command_level, 0.0)
                 target_vpk = drive_vpk * target_peak_g_current
+                if closed_loop:
+                    target_vpk = feedback.command(freq, drive_vpk, target_peak_g_current)
                 command_block = target_vpk * sin_block
 
                 command_block, limiter_stats = apply_safety_limiters(
@@ -1018,6 +1146,10 @@ class ControllerWorker(QThread):
 
                 queued = QueuedDrive(command_block, command_level, frequency=freq, clipping=clipping_fraction,
                                      limited=bool(limiter_stats['any_limiting'] or clipping_fraction))
+                if dwell_remaining <= 1e-9 and step_ready and drain_blocks:
+                    queued = QueuedDrive(np.zeros(block_samples), 0.)
+                    drain_blocks -= 1
+                    draining_endpoint = True
                 data, applied = self._exchange_block(ao_writer, ai_reader, queued, simulation_mode, block_samples, io_timeout)
                 command_level = applied.level
                 target_peak_g_current = target_g_peak * command_level
@@ -1029,15 +1161,24 @@ class ControllerWorker(QThread):
                 meas_rms = float(np.std(accel_data))
                 meas_peak = meas_rms * math.sqrt(2.0)
                 a_rms_meas = meas_rms
+                tone_peak, residual_rms = measure_tone(accel_data, applied_freq, fs)
+                self._check_response(data, applied, target_peak_g_current / math.sqrt(2),
+                                     feedback_rms=tone_peak / math.sqrt(2))
+                settled = feedback.observe(applied_freq, tone_peak, residual_rms,
+                    float(np.max(np.abs(applied.waveform))), command_level, applied.limited,
+                    target_peak_g_current) if applied_freq > 0 else False
+                if closed_loop and applied_freq == freq:
+                    step_ready = settled
 
                 if cmd_rms > 1e-9:
                     new_gain = meas_rms / cmd_rms
                     plant_gain = 0.8 * plant_gain + 0.2 * new_gain
 
-                now = time.time()
-                dt = max(now - last_level_update, 1e-3)
-                last_level_update = now
-                if level_fraction < 1.0 and max_level_rate > 0.0:
+                dt = block_duration
+                tracking = (not closed_loop or command_level <= 0 or
+                    (feedback.ready and target_peak_g_current > 0
+                     and abs(tone_peak / target_peak_g_current - 1) <= self.shared_config.tracking_tolerance_percent / 50))
+                if level_fraction < 1.0 and max_level_rate > 0.0 and tracking:
                     level_fraction = min(1.0, level_fraction + max_level_rate * dt)
 
                 sat_frac = float(
@@ -1065,6 +1206,8 @@ class ControllerWorker(QThread):
                             if applied_freq > 0 and start_hz != end_hz else 1.0 if applied_freq > 0 else 0.)
                 self._publish_metrics({'accel_rms_g': a_rms_meas,
                     'accel_peak_g': meas_peak, 'target_peak_g': target_peak_g_current,
+                    'tone_peak_g': tone_peak, 'tone_residual_rms_g': residual_rms,
+                    'feedback_ready': feedback.ready, 'settled': bool(settled),
                     'target_rms_g': target_peak_g_current / math.sqrt(2),
                     'frequency_hz': applied_freq, 'sweep_progress': min(1.0, progress),
                     'level_fraction': command_level, 'next_level_fraction': level_fraction,
@@ -1086,8 +1229,8 @@ class ControllerWorker(QThread):
                         target_peak_g_current,
                     )
 
-                if applied_freq == freq:
-                    dwell_remaining -= block_duration
+                dwell_remaining -= block_duration
+                step_seconds += block_duration
 
                 if getattr(config, 'CONSOLE_UPDATE_INTERVAL', 5.0) > 0:
                     pass  # optional additional logging removed for simplicity
@@ -1095,6 +1238,8 @@ class ControllerWorker(QThread):
                 self._pace_block(simulation_mode, loop_start, block_duration)
 
             first_step = False
+            if self.should_stop.is_set():
+                break
             if not stepper.advance():
                 if not self.shared_config.sine_repeat:
                     self.terminal_state = "complete"

@@ -12,6 +12,7 @@ from types import MappingProxyType
 from typing import Any, Mapping
 
 from app_paths import resolve_recording_directory
+from control_features import FEATURE_DEFAULTS
 
 NUMERIC_FIELDS = ('fs', 'block_seconds', 'buf_seconds', 'welch_nperseg',
     'ao_volt_limit', 'max_rms_volts', 'max_crest_factor', 'crest_soft_knee',
@@ -25,6 +26,9 @@ NUMERIC_FIELDS = ('fs', 'block_seconds', 'buf_seconds', 'welch_nperseg',
     'sim_delay_samples', 'sim_nonlinearity', 'realtime_psd_update_stride')
 INTEGER_FIELDS = ('welch_nperseg', 'eq_num_bands', 'sim_delay_samples', 'realtime_psd_update_stride')
 BOOLEAN_FIELDS = ('simulation_mode', 'data_log_enabled', 'sine_g_level_is_rms', 'sine_repeat', 'sync_ao_clock')
+NUMERIC_FIELDS += tuple(key for key, value in FEATURE_DEFAULTS.items() if isinstance(value, (int, float)) and not isinstance(value, bool))
+BOOLEAN_FIELDS += tuple(key for key, value in FEATURE_DEFAULTS.items() if isinstance(value, bool))
+INTEGER_FIELDS += ('sine_settle_blocks',)
 
 
 class ConfigurationError(ValueError):
@@ -156,6 +160,35 @@ def validate_settings(values):
     number('max_crest_factor', lower=1)
     number('crest_soft_knee', lower=0, upper=1)
     number('rms_limit_headroom', lower=0, upper=1)
+    for key in ('response_max_rms_g', 'response_max_peak_g', 'response_max_backlog_seconds',
+                'feedback_min_rms_g', 'feedback_min_drive_v', 'feedback_loss_seconds',
+                'sine_pilot_vpk', 'sine_correction_rate', 'sine_max_step_seconds', 'report_min_seconds'):
+        if key in values:
+            number(key, positive=True)
+    for key in ('feedback_startup_seconds', 'sine_settle_seconds', 'report_settle_seconds', 'calibration_min_hz',
+                'calibration_max_hz', 'calibration_level_peak_g'):
+        if key in values:
+            number(key, lower=0)
+    if 'response_target_ratio' in values:
+        number('response_target_ratio', lower=1)
+    if 'tracking_tolerance_percent' in values:
+        number('tracking_tolerance_percent', positive=True, upper=50)
+    if 'sine_settle_blocks' in values:
+        settled = number('sine_settle_blocks', lower=1, upper=100)
+        if settled != int(settled):
+            errors['sine_settle_blocks'] = 'Settling block count must be an integer.'
+    if (not {'response_max_peak_g', 'response_max_rms_g'} & errors.keys()
+            and float(values.get('response_max_peak_g', 30)) < float(values.get('response_max_rms_g', 10))):
+        errors['response_max_peak_g'] = 'Measured peak limit must be at least the RMS limit.'
+    if values.get('calibration_run'):
+        if mode != 'sine_sweep' or not values.get('sine_closed_loop') or values.get('sine_repeat'):
+            errors['calibration_run'] = 'Calibration requires a nonrepeating closed-loop sine sweep.'
+        if not values.get('response_limits_enabled'):
+            errors['response_limits_enabled'] = 'Response protection is required during calibration.'
+        if not values.get('simulation_mode'):
+            for key in ('calibration_equipment', 'calibration_amp_setting', 'calibration_sensor_id'):
+                if not str(values.get(key, '')).strip():
+                    errors[key] = 'Identify the equipment, amplifier setting, and control sensor before hardware calibration.'
 
     if mode == 'random':
         profile = points('target_psd_points', 2)
@@ -199,6 +232,12 @@ def validate_settings(values):
         number('sine_drive_scale', lower=0)
         if values.get('sine_drive_table'):
             points('sine_drive_table', 1, allow_zero=True)
+        if values.get('sine_closed_loop') and min(start, end) * block < 2:
+            errors['block_seconds'] = 'Closed-loop tone measurement requires at least two cycles of the lowest frequency per block.'
+        if (values.get('sine_closed_loop') and 'sine_max_level_rate' not in errors
+                and 'sine_initial_level' not in errors and float(values['sine_initial_level']) < 1
+                and float(values['sine_max_level_rate']) == 0):
+            errors['sine_max_level_rate'] = 'Enable a positive ramp rate to reach full target with closed-loop sine.'
 
     if values.get('simulation_mode'):
         number('sim_plant_gain', positive=True)
@@ -288,6 +327,8 @@ class RunSettings:
     @classmethod
     def capture(cls, values):
         values = dict(values)
+        for key, value in FEATURE_DEFAULTS.items():
+            values.setdefault(key, value)
         values.setdefault('random_initial_rms_volts', .001)
         if not isinstance(values.get('input_channel_labels'), (list, tuple)):
             raise ConfigurationError({'input_channel_labels': 'Channel labels must be a list.'})
@@ -325,7 +366,8 @@ class RunSettings:
                                            sensitivity_mv_per_g=float(channel['sensitivity_mv_per_g']),
                                            excitation_amps=float(channel['excitation_amps']))
                                       for channel in values['response_channels']]
-        for key in ('device_ai', 'device_ao', 'data_log_dir', 'calibration_source', 'preset_source'):
+        for key in ('device_ai', 'device_ao', 'data_log_dir', 'calibration_source', 'preset_source',
+                    'calibration_equipment', 'calibration_amp_setting', 'calibration_sensor_id', 'calibration_backend'):
             if key in values and not isinstance(values[key], str):
                 raise ConfigurationError({key: 'Must be text.'})
         if values.get('data_log_dir'):

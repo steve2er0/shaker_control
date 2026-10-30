@@ -80,6 +80,14 @@ SINE_SWEEP_POINTS_PER_OCTAVE = 12
 SINE_SWEEP_STEP_DWELL = 0.5    # Dwell time per frequency step [s]
 SINE_SWEEP_DEFAULT_VPK = 0.4   # V peak per 1 g peak when no table is provided
 SINE_SWEEP_DRIVE_SCALE = 1.0   # Global scale factor applied to the drive table/default
+# New sessions use fundamental-amplitude feedback. Legacy presets without the
+# flag load with their original feedforward behavior.
+SINE_CLOSED_LOOP = True
+SINE_PILOT_VPK = 0.001
+SINE_CORRECTION_RATE = 0.5      # Maximum fractional voltage rise per second
+SINE_SETTLE_SECONDS = 1.0
+SINE_SETTLE_BLOCKS = 2
+SINE_MAX_STEP_SECONDS = 45.0    # Deadline for achieving settled tracking
 SINE_SWEEP_CALIBRATION_SOURCE = ""  # Record equipment/load/date or simulation provenance
 SINE_SWEEP_DRIVE_TABLE = [     # Optional (frequency [Hz], V peak per 1 g peak)
     (20.000000, 0.781627),
@@ -97,6 +105,23 @@ DATA_LOG_ENABLED = True
 # None uses the OS Documents folder / ShakerControl / Runs. Explicit relative
 # folders (for example "data_logs") are resolved from this checkout, not the cwd.
 DATA_LOG_DIR = None
+REPORT_ENABLED = True
+TRACKING_TOLERANCE_PERCENT = 5.0
+REPORT_MIN_SECONDS = 10.0      # Minimum full-target random assessment duration
+REPORT_SETTLE_SECONDS = 2.0
+
+# Measured-response checks run once per acquired block, before control updates.
+# Limits apply to every enabled input; the relative limit and feedback-loss
+# timer apply to the control sensor. Select values for the actual equipment.
+RESPONSE_LIMITS_ENABLED = True
+RESPONSE_MAX_RMS_G = 10.0
+RESPONSE_MAX_PEAK_G = 30.0
+RESPONSE_TARGET_RATIO = 2.0
+RESPONSE_MAX_BACKLOG_SECONDS = 2.0
+FEEDBACK_MIN_RMS_G = 0.001
+FEEDBACK_MIN_DRIVE_V = 0.0005
+FEEDBACK_LOSS_SECONDS = 3.0
+FEEDBACK_STARTUP_SECONDS = 3.0
 
 # ============= SIMULATION MODE =============
 SIMULATION_MODE = False          # Set to False for real hardware

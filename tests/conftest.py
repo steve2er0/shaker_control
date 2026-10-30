@@ -43,6 +43,9 @@ def window(qt_app):
     panel.fields['welch_nperseg'].setValue(512)
     panel.fields['eq_num_bands'].setValue(8)
     panel.fields['data_log_enabled'].setChecked(False)
+    panel.fields['report_enabled'].setChecked(False)
+    panel.fields['sine_closed_loop'].setChecked(False)
+    panel.fields['response_limits_enabled'].setChecked(False)
     assert panel.apply_config()
     yield widget
     if widget.busy:
@@ -57,5 +60,6 @@ def settings_data():
     from app import SharedConfig
     data = SharedConfig().as_dict()
     data.update(simulation_mode=True, fs=8000, block_seconds=.1,
-                welch_nperseg=512, eq_num_bands=8, data_log_enabled=False)
+                welch_nperseg=512, eq_num_bands=8, data_log_enabled=False,
+                report_enabled=False, sine_closed_loop=False, response_limits_enabled=False)
     return data

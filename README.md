@@ -193,16 +193,49 @@ Select **Sine Sweep** in the main GUI. It uses logarithmically spaced frequency
 steps and a phase-continuous oscillator. Dwell time respects the configured
 octaves-per-minute rate, minimum dwell, and processing block duration. The first
 step has an additional initial settling dwell (3 seconds by default).
+Dwell rounds up to whole processing blocks. Hardware scheduling counts the
+blocks queued to AO and captures the final endpoint before completion; the
+initial zero priming block does not add a block to every frequency dwell.
 
-Amplitude is derived from `SINE_SWEEP_DRIVE_TABLE`, interpreted as peak volts
-required per 1 g-peak, multiplied by the target acceleration and level fraction.
-Measured acceleration is displayed and logged; it does not close an amplitude
-feedback loop. The drive table must match the actual shaker, fixture, and load.
-Displayed g-peak is estimated as sqrt(2) times block standard deviation, assuming
-a sinusoidal response; noise and harmonics affect this estimate. The plot and
-CSV summary retain the largest estimate during each frequency dwell. The plot
-retains the maximum at each frequency across repeated sweeps. Both ascending and
-descending sweeps include the exact endpoint; nonrepeating sweeps then complete.
+New sessions enable **Enable sine amplitude feedback**. The table supplies a
+feedforward estimate in V peak per 1 g peak; a low pilot identifies measured
+gain before drive rises toward target. Gain updates use the confirmed applied
+command and a phase-independent fundamental fit. Unresolved or clipped feedback
+cannot accumulate correction. Upward voltage changes are bounded by the configured
+fraction per second and voltage limits. The ramp advances after tracking, and a
+frequency holds until the configured consecutive full-target blocks settle within
+tolerance. Failure to settle before the deadline faults and stops the run.
+
+The live sine value/curve shows the fitted fundamental, with noise/harmonics
+reported separately as residual RMS. Broadband sqrt(2) × standard deviation and
+raw sample peaks remain available in recordings and reports. Both sweep directions
+include the exact endpoint; final queued measurements are captured before stopping.
+Disabling feedback selects the original feedforward behavior. Legacy imported
+presets without the feedback flag retain that behavior.
+
+Open **Control → Calibration → Calibration wizard** while stopped. Review the
+backend, frequency range, target in g peak, and output ceiling; identify the
+shaker/fixture/load, amplifier setting, and sensor. Start explicitly runs the
+selected hardware or simulation backend through the normal worker and protection
+checks. Stop/Close cancels through normal cleanup. Only a fully completed,
+in-tolerance calibration enables **Apply table and save preset**. The table is
+normalized to V peak per 1 g peak regardless of calibration target. Applying saves
+a unique preset under Documents/ShakerControl/Presets with backend, date, sensor
+sensitivity, equipment, amplitude, and frequency coverage. Simulation provenance
+is retained; changing backend/sensitivity/channels prevents applying that result.
+
+On October 29, 2026, actual NI USB-4431 sweeps from 100–500 Hz and back completed
+at **0.5 g-peak**, using a newly measured table for the connected setup. Each
+direction recorded 29 frequencies in 64 one-second blocks, including priming and
+initial settling. The last block at every frequency was within **0.5%** of target,
+with no reported faults or output limiting. See the
+[results chart](docs/hardware-validation/2026-10-29-sine-sweeps/sine-sweeps.png),
+[measurements and validation](docs/hardware-validation/2026-10-29-sine-sweeps/validation.json),
+and [tested setup preset](docs/hardware-validation/2026-10-29-sine-sweeps/validated-setup-preset.json).
+These earlier sweeps used feedforward control; they do not validate the newly
+added feedback/protection/wizard features on hardware. That preset applies to
+this shaker/amplifier/fixture/sensor setup; other levels
+and frequencies were not validated by these sweeps.
 
 The calibration CLI iteratively adjusts voltage at each frequency to produce a
 target acceleration. For an explicit simulation example:
@@ -222,6 +255,53 @@ calibration; normalize tables generated for another target before using them.
 
 `sine_sweep.py` contains reusable generation/interpolation utilities and is not
 a standalone application.
+
+### Measured-response protection
+
+**Control → Control → Measured-response protection** configures broadband RMS
+and absolute raw-sample peak limits for every enabled sensor, a control-RMS limit
+relative to the full target, maximum unread-data age, and a driven-output feedback
+loss timeout. Startup allowance and minimum feedback/drive thresholds are explicit.
+Random feedback-loss detection uses control-band RMS; sine uses fitted-tone RMS.
+NI input overload flags are checked when supported; unsupported detection is
+reported in stream diagnostics. Nonfinite input always faults.
+
+Threshold violations fault the worker and stop/close output and input tasks before
+recording finalization. With raw recording enabled, `protection-trip-block.npz`
+preserves the triggering acceleration and associated command. These checks occur
+once per acquired block: block/read timeout and driver cleanup affect stop latency.
+The driver is asked to use zero-voltage idle output where supported; support is
+recorded in diagnostics and physical stop behavior still requires device validation.
+Choose the limits for the actual equipment; this software is not an independent
+hardware interlock. Defaults are 10 g broadband RMS, 30 g raw peak, twice the full
+control RMS target, 2 seconds unread data, and 3 seconds unresolved driven feedback
+after a 3-second startup allowance.
+
+### Automatic tracking reports
+
+Enable automatic reports under **Recording** and set tracking tolerance and the
+minimum random assessment time. Every run receives a separate tracking status:
+**PASS**, **FAIL**, or **INCOMPLETE**. A stopped/partial finite sine sweep cannot
+pass. Sine assessment evaluates every block in the last configured settling window
+at each frequency; transient maxima are separate. Random assessment excludes ramp
+and initial settling, then evaluates all full-target blocks and requires the
+configured minimum duration. Any acquisition/protection fault prevents a pass.
+
+Reports include `test-report.html`, `test-report.json`, `block-metrics.csv`, and
+`settled-sine-results.csv` for sine. The desktop automatically adds `tracking.png`
+with tolerance bands after acquisition stops; headless worker use still exports
+HTML/CSV without requiring a GUI chart. Open the report from **Results → Open HTML
+test report**. Reports share the raw recording folder when enabled; otherwise they
+go to Documents/ShakerControl/Reports. Tracking assessment does not establish
+sample-level AI/AO synchronization or whole-run PSD qualification.
+
+Reproduce the simulation-only feature review with
+`python scripts/review_control_features.py`. It prohibits real NI tasks and
+omits simulation pacing waits. The saved evidence distinguishes sample seconds
+from wall seconds; it is not a hardware stability or physical stop test.
+Saved review artifacts include the [validation summary](docs/control-features/validation.json),
+[calibration wizard](docs/control-features/calibration-wizard.png), and a
+[sample automatic report](docs/control-features/sample-report/test-report.html).
 
 ## Run the accelerometer monitor
 
