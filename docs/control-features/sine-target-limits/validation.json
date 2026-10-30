@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "client_task_date": "2026-10-30",
-  "scope": "Software and native UI verification; no shaker acquisition after the target-stop and plot changes. Plot replays the previously recorded 0.5 g sweep. A 1 g hardware run has not been performed.",
+  "scope": "Software and native UI verification at feature implementation; plot replays the prior 0.5 g sweep. The subsequent successful 1 g hardware run is linked below.",
   "tests": {
     "command": "python -m pytest -q tests",
     "passed": 234,
@@ -48,5 +48,16 @@
       "bytes": 74172,
       "sha256": "bb52188b5cc9f98e84b3b74921e3fc2ac08908b4003d9617386ff133f99bc0ff"
     }
+  },
+  "follow_up_hardware_verification": {
+    "reference": "../../hardware-validation/2026-10-30-wide-sine-1g/validation.json",
+    "outcome": "complete",
+    "tracking_status": "pass",
+    "frequencies": 81,
+    "sample_seconds": 409,
+    "raw_peak_stop_g": 1.7,
+    "rms_stop_g": 1.1,
+    "plot_checks": 3740,
+    "plot_range_mismatches": 0
   }
 }

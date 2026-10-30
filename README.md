@@ -263,6 +263,20 @@ target (±5% by default) and fixes its vertical range just beyond that band. At
 1 g peak and 5% tolerance, bounds are 0.95–1.05 g and the y-axis stays at
 0.90–1.10 g. Startup or outliers do not move the axis; the numeric readout and
 an above/below-range status retain responses outside the visible range.
+
+The target edit and fixed plot were subsequently verified on the same NI hardware
+with a **1 g-peak, 20–2000 Hz sweep**. Editing the 0.5 g target in the normal setup
+editor moved the raw peak stop from 0.85 to **1.70 g** and the RMS stop from 0.55
+to **1.10 g**. All 81 frequencies passed in 409 seconds, with a worst individual
+settled-window error of **4.51%**. The fitted transient reached 1.197 g peak and
+the largest raw sample was 1.233 g; no protection trip or command limiting occurred.
+All 3,740 live plot checks retained the **0.90–1.10 g** vertical range, with the
+**0.95–1.05 g** tolerance band. This normal run verified the applied stops without
+deliberately exceeding them. See the
+[1 g hardware report](docs/hardware-validation/2026-10-30-wide-sine-1g/test-report.html),
+[fixed-axis response chart](docs/hardware-validation/2026-10-30-wide-sine-1g/response-bounds.png),
+and [verification details](docs/hardware-validation/2026-10-30-wide-sine-1g/validation.json).
+
 The level ramp advances after tracking, and each frequency holds until the
 configured consecutive full-target blocks settle within
 tolerance. Failure to settle before the deadline faults and stops the run.

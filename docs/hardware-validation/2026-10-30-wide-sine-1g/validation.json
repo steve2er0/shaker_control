@@ -1,0 +1,130 @@
+{
+  "schema_version": 1,
+  "client_task_date": "2026-10-30",
+  "source_base_commit": "fdeff1b62e109d34766b403c3f1a87234b9f6628",
+  "source_state": "Committed target-stop scaling and fixed plot bounds; no application source changes for this hardware test.",
+  "source_sha256": {
+    "app.py": "ae284f44f4db88866cc37a60bf286826d81986dc59847ebba40b146a711a629c",
+    "sine_sweep.py": "d7239872ecd110979d3c588655af56057edda35c1f3d9b9ec219a2b3197acbfd",
+    "control_features.py": "be15a766c11d33c49b050e4140a68f9d20c1a14be75f19247334246fc1feced0",
+    "workspace_ui.py": "a6372a43462bc1f1f8a6e98b372ba5007d90eb252489a63524035f66a2857fb5",
+    "channel_display.py": "70f7cc5fe374404fa917383667010ac106671f39c49a597649a0633fee3c98e7",
+    "run_settings.py": "4ece37d6b9be608f0eed4afbc0812da02598d4ada6aaa959ab4f61b85afe737d"
+  },
+  "session_id": "d39c558c",
+  "started_at": "2026-10-30T10:34:23.046660-04:00",
+  "outcome": "complete",
+  "error": "",
+  "tracking_status": "pass",
+  "expected_frequency_count": 81,
+  "observed_frequency_count": 81,
+  "start_hz": 20.0,
+  "end_hz": 2000.0,
+  "target_g_peak": 1.0,
+  "requested_octaves_per_minute": 2.5,
+  "minimum_dwell_seconds": 0.5,
+  "points_per_octave": 12,
+  "total_sample_seconds": 409.0,
+  "total_wall_seconds": 409.39867540448904,
+  "worst_settled_window_error_percent": 4.5061462422629095,
+  "worst_settled_mean_error_percent": 2.374553187093298,
+  "whole_run_maximum_fitted_peak_g": 1.1966864355565443,
+  "whole_run_maximum_raw_sample_peak_g": 1.2331557273864746,
+  "maximum_command_peak_v": 0.18014139705950738,
+  "independent_final_block_tone_fit_g_peak": 1.0041611393710959,
+  "channel_display": {
+    "checks": 3740,
+    "visible_checks": 0,
+    "largest_time_curve_points": 0,
+    "max_heartbeat_gap_seconds": 0.1271924003958702,
+    "plot_range_checks": 3740,
+    "plot_range_mismatches": 0,
+    "y_autorange_checks": 0
+  },
+  "target_stop_and_plot_verification": {
+    "before": {
+      "sine_g_level": 0.5,
+      "response_max_peak_g": 0.85,
+      "response_max_rms_g": 0.55
+    },
+    "after": {
+      "sine_g_level": 1.0,
+      "response_max_peak_g": 1.7,
+      "response_max_rms_g": 1.1,
+      "response_target_ratio": 1.5
+    },
+    "plot_y_range": [
+      0.8999999999999999,
+      1.1
+    ],
+    "lower_bound_g_peak": [
+      0.95,
+      0.95
+    ],
+    "upper_bound_g_peak": [
+      1.05,
+      1.05
+    ],
+    "plot_range_checks": 3740,
+    "plot_range_mismatches": 0,
+    "y_autorange_checks": 0
+  },
+  "stream_diagnostics": {
+    "ao_idle_output": "Zero volts requested from NI driver",
+    "input_buffer_samples_per_channel": 819200,
+    "output_buffer_samples_per_channel": 819200,
+    "priming_samples": 51200,
+    "regeneration_enabled": false,
+    "max_write_seconds": 0.0010679960250854492,
+    "last_input_backlog_samples": 0,
+    "max_input_backlog_samples": 833,
+    "max_read_seconds": 0.9998491033911705,
+    "input_overload_detection": "NI input overload flag checked per block",
+    "max_record_seconds": 0.00920029729604721,
+    "max_loop_seconds": 1.017544001340866
+  },
+  "protection_trip": null,
+  "limiting_blocks": 0,
+  "recording_directory": "20261030_103423_263355_d22f37_sine_sweep",
+  "recording_files": {
+    "data.h5": {
+      "bytes": 167613392,
+      "sha256": "4084f9a2f7e5153c277f4f10bcbd4a68ae2ecf9dbb274b839f20dd7e6167d684"
+    },
+    "settings.json": {
+      "bytes": 5218,
+      "sha256": "6492d35da59b4bc008f56e6ac7b4feefb91de5c292247ecd5e0d65798212e0e4"
+    },
+    "run-summary.json": {
+      "bytes": 54593,
+      "sha256": "d2997cafa1a44b012a503d7346c0217f7a67c995d1ae130fb8907721c554ff57"
+    }
+  },
+  "scope": "One NI USB-4431 control input ai0, 10 mV/g, 2.1 mA IEPE, this shaker/amplifier/fixture setup. Independent AI/AO clocks. Protections active, no deliberate fault injection or independent voltage measurement. Feedback settling extends the requested minimum-rate dwell.",
+  "exports": {
+    "block-metrics.csv": {
+      "bytes": 100217,
+      "sha256": "b65945aec02b5f9a73468c2edd90b3416f1d88fa3de5015d75579e6fed5f2ba8"
+    },
+    "settled-sine-results.csv": {
+      "bytes": 12066,
+      "sha256": "9f40db164a905c252b10e1aa280861b81214532d9587a5f0915f0495342930d4"
+    },
+    "test-report.html": {
+      "bytes": 9037,
+      "sha256": "2879472e14dd1030ede94b729c7e3387f24a54a145b83391c68b8dc6a4cea3dd"
+    },
+    "test-report.json": {
+      "bytes": 54505,
+      "sha256": "d87b1faf629206987503d9b7e6e4a983164a77dbd7713a57e72be64b9c14b3e0"
+    },
+    "tracking.png": {
+      "bytes": 69471,
+      "sha256": "d8f970d1eeff8a30adc2dd061a58aa503240fffe763d44f1613c6163be12d3bc"
+    },
+    "response-bounds.png": {
+      "bytes": 69199,
+      "sha256": "55c23a986f07db3e649e392f7f5147df1f59888fa27511f5f60fcb7900fe64a7"
+    }
+  }
+}
