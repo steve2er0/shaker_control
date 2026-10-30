@@ -239,6 +239,20 @@ def validate_settings(values):
                 and float(values['sine_max_level_rate']) == 0):
             errors['sine_max_level_rate'] = 'Enable a positive ramp rate to reach full target with closed-loop sine.'
 
+    if values.get('response_limits_enabled'):
+        try:
+            required_rms = (_profile_rms(values['target_psd_points']) if mode == 'random' else
+                float(values['sine_g_level']) / (1 if values.get('sine_g_level_is_rms') else math.sqrt(2)))
+            required_peak = required_rms * math.sqrt(2) if mode == 'sine_sweep' else required_rms
+            if float(values['response_max_rms_g']) < required_rms:
+                errors['response_max_rms_g'] = (f'Target is {required_rms:.5g} g RMS, above the measured RMS stop. '
+                    'Lower the target or review the equipment limit before starting.')
+            if float(values['response_max_peak_g']) < required_peak:
+                errors['response_max_peak_g'] = (f'Target requires at least {required_peak:.5g} g peak, above the measured peak stop. '
+                    'Lower the target or review the equipment limit before starting.')
+        except (KeyError, TypeError, ValueError, OverflowError, ZeroDivisionError):
+            pass  # The existing target/numeric field checks explain malformed values.
+
     if values.get('simulation_mode'):
         number('sim_plant_gain', positive=True)
         number('sim_noise_level', lower=0)

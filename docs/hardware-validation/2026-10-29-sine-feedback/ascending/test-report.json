@@ -1,0 +1,804 @@
+{
+  "outcome": "complete",
+  "backend": "Hardware",
+  "input_mode": "Dev1/ai0: Acceleration input in g (2.1 mA IEPE)",
+  "clock_status": "Independent AI/AO clocks configured",
+  "requested_backend": "Hardware",
+  "error": "",
+  "started_at": "2026-10-29T22:31:19.942253-04:00",
+  "duration_s": 130.36577310413122,
+  "sample_seconds": 130.0,
+  "blocks": 130,
+  "latest_metrics": {
+    "accel_rms_g": 0.35383330182880074,
+    "accel_peak_g": 0.5003958542655429,
+    "target_peak_g": 0.5,
+    "tone_peak_g": 0.5002903438522195,
+    "tone_residual_rms_g": 0.0072657695521691455,
+    "feedback_ready": true,
+    "settled": true,
+    "target_rms_g": 0.35355339059327373,
+    "frequency_hz": 500.0,
+    "sweep_progress": 1.0,
+    "level_fraction": 1.0,
+    "next_level_fraction": 1.0,
+    "saturation_fraction": 0.0,
+    "clipping_fraction": 0.0,
+    "plant_gain_g_per_v": 55.167625197151125,
+    "output_rms_v": 0.006582832974413389,
+    "output_peak_v": 0.00930952923823721,
+    "output_cf": 1.4142131927731014,
+    "limiter_active": false,
+    "input_backlog_seconds": 0.0,
+    "elapsed_s": 130.33185560256243,
+    "block_index": 130,
+    "raw_peak_g": 0.5361170768737793,
+    "broadband_rms_g": 0.35383330182880074
+  },
+  "stream_diagnostics": {
+    "ao_idle_output": "Zero volts requested from NI driver",
+    "input_buffer_samples_per_channel": 819200,
+    "output_buffer_samples_per_channel": 819200,
+    "priming_samples": 51200,
+    "regeneration_enabled": false,
+    "max_write_seconds": 0.011263400316238403,
+    "last_input_backlog_samples": 0,
+    "max_input_backlog_samples": 807,
+    "max_read_seconds": 1.005893997848034,
+    "input_overload_detection": "NI input overload flag checked per block",
+    "max_record_seconds": 0.03134159743785858,
+    "max_loop_seconds": 1.0269383043050766
+  },
+  "control_algorithm": "sine_gain_feedback_v1",
+  "settings": {
+    "revision": 1,
+    "fs": 51200.0,
+    "buf_seconds": 4.0,
+    "block_seconds": 1.0,
+    "welch_nperseg": 4096,
+    "target_psd_points": [
+      [
+        100.0,
+        0.01
+      ],
+      [
+        300.0,
+        0.04
+      ],
+      [
+        350.0,
+        0.04
+      ],
+      [
+        500.0,
+        0.01
+      ]
+    ],
+    "test_mode": "sine_sweep",
+    "sine_start_hz": 100.0,
+    "sine_end_hz": 500.0,
+    "sine_g_level": 0.5,
+    "sine_g_level_is_rms": false,
+    "sine_octaves_per_min": 2.5,
+    "sine_repeat": false,
+    "sine_points_per_octave": 12.0,
+    "sine_step_dwell": 2.0,
+    "sine_default_vpk": 0.008,
+    "sine_drive_scale": 1.0,
+    "sine_drive_table": [
+      [
+        100.0,
+        0.019599488801064092
+      ],
+      [
+        105.94630943592954,
+        0.01858422703213048
+      ],
+      [
+        112.24620483093732,
+        0.017757811921199188
+      ],
+      [
+        118.92071150027213,
+        0.017091376586418325
+      ],
+      [
+        125.99210498948734,
+        0.01655528598052831
+      ],
+      [
+        133.48398541700348,
+        0.016099162538513786
+      ],
+      [
+        141.42135623730957,
+        0.015709491702134804
+      ],
+      [
+        149.83070768766822,
+        0.015394277432282348
+      ],
+      [
+        158.74010519682002,
+        0.01516843178709372
+      ],
+      [
+        168.179283050743,
+        0.015010309061256406
+      ],
+      [
+        178.17974362806797,
+        0.014899259324216286
+      ],
+      [
+        188.77486253633882,
+        0.014837083876504339
+      ],
+      [
+        200.00000000000014,
+        0.014610571573386313
+      ],
+      [
+        211.8926188718592,
+        0.014639085970991866
+      ],
+      [
+        224.49240966187477,
+        0.014737654884518038
+      ],
+      [
+        237.8414230005444,
+        0.01482862506537971
+      ],
+      [
+        251.98420997897486,
+        0.014949406815216783
+      ],
+      [
+        266.96797083400713,
+        0.015146249564607719
+      ],
+      [
+        282.8427124746193,
+        0.014937110151526836
+      ],
+      [
+        299.6614153753366,
+        0.01517827790362448
+      ],
+      [
+        317.4802103936402,
+        0.01540383701026123
+      ],
+      [
+        336.3585661014862,
+        0.015623774574576877
+      ],
+      [
+        356.3594872561361,
+        0.015860601059934358
+      ],
+      [
+        377.5497250726778,
+        0.016122873336329162
+      ],
+      [
+        400.00000000000045,
+        0.016416868148479435
+      ],
+      [
+        423.7852377437186,
+        0.016783120213766236
+      ],
+      [
+        448.9848193237497,
+        0.01727440227927612
+      ],
+      [
+        475.682846001089,
+        0.017799219098413734
+      ],
+      [
+        500.0,
+        0.018568477876921407
+      ]
+    ],
+    "data_log_enabled": true,
+    "data_log_dir": "data_logs",
+    "initial_level_fraction": 0.1,
+    "max_level_fraction_rate": 2.0,
+    "kp": 0.3,
+    "ki": 0.06,
+    "random_initial_rms_volts": 0.001,
+    "sine_initial_level": 0.2,
+    "sine_max_level_rate": 0.2,
+    "sine_initial_settle": 5.0,
+    "eq_num_bands": 36,
+    "eq_adapt_rate": 0.2,
+    "eq_smooth_factor": 0.9,
+    "eq_adapt_level_threshold": 0.4,
+    "eq_adapt_level_power": 1.0,
+    "eq_adapt_min_weight": 0.0,
+    "max_crest_factor": 5.0,
+    "max_rms_volts": 0.02,
+    "ao_volt_limit": 0.03,
+    "accel_excitation_amps": 0.0021000000000000003,
+    "sync_ao_clock": false,
+    "simulation_mode": false,
+    "sim_plant_gain": 4.0,
+    "sim_noise_level": 0.02,
+    "device_ai": "Dev1/ai0",
+    "device_ao": "Dev1/ao0",
+    "accel_mv_per_g": 10.0,
+    "response_channels": [],
+    "sim_resonances": [
+      [
+        150.0,
+        15.0,
+        3.0
+      ],
+      [
+        800.0,
+        25.0,
+        2.5
+      ]
+    ],
+    "sim_delay_samples": 5,
+    "sim_nonlinearity": 0.05,
+    "crest_soft_knee": 0.8,
+    "rms_limit_headroom": 0.9,
+    "eq_gain_limits": [
+      0.2,
+      10.0
+    ],
+    "calibration_source": "2026-10-29 current shaker/amp/load; NI USB-4431 Dev1 ai0, 10 mV/g, 2.1 mA IEPE. Last-block tone fit at 0.5 g-peak nominal from 02b82812; revalidate after setup changes.",
+    "preset_source": "",
+    "input_channel_labels": [
+      "Control Accel"
+    ],
+    "num_input_channels": 1,
+    "realtime_psd_update_stride": 5,
+    "response_limits_enabled": true,
+    "response_max_rms_g": 0.55,
+    "response_max_peak_g": 0.85,
+    "response_target_ratio": 1.5,
+    "response_max_backlog_seconds": 1.5,
+    "feedback_min_rms_g": 0.001,
+    "feedback_min_drive_v": 0.0005,
+    "feedback_loss_seconds": 3.0,
+    "feedback_startup_seconds": 3.0,
+    "sine_closed_loop": true,
+    "sine_pilot_vpk": 0.001,
+    "sine_correction_rate": 0.5,
+    "sine_settle_seconds": 1.0,
+    "sine_settle_blocks": 3,
+    "sine_max_step_seconds": 25.0,
+    "tracking_tolerance_percent": 5.0,
+    "report_min_seconds": 10.0,
+    "report_settle_seconds": 2.0,
+    "report_enabled": true,
+    "calibration_run": false,
+    "calibration_equipment": "",
+    "calibration_amp_setting": "",
+    "calibration_sensor_id": "",
+    "calibration_min_hz": 100.0,
+    "calibration_max_hz": 500.0,
+    "calibration_level_peak_g": 0.5,
+    "calibration_backend": "Hardware"
+  },
+  "config_id": "82b76b032fa2",
+  "log_dir": null,
+  "protection_trip": null,
+  "qualification": {
+    "tolerance_percent": 5.0,
+    "maximum_raw_sample_peak_g": 0.6627054214477539,
+    "limiting_blocks": 0,
+    "steps": [
+      {
+        "frequency_hz": 100.0,
+        "seconds": 13.0,
+        "transient_peak_g": 0.5467381477355957,
+        "maximum_sine_equivalent_peak_g": 0.5095585978190054,
+        "status": "pass",
+        "settled_peak_g": 0.5047777233957552,
+        "settled_error_percent": 0.9555446791510436,
+        "worst_settled_error_percent": 1.4028419872111453,
+        "target_peak_g": 0.5,
+        "volts_peak_per_g": 0.01966149213020655
+      },
+      {
+        "frequency_hz": 105.94630943592954,
+        "seconds": 6.0,
+        "transient_peak_g": 0.5635342597961426,
+        "maximum_sine_equivalent_peak_g": 0.5298137385069831,
+        "status": "pass",
+        "settled_peak_g": 0.5007609034084382,
+        "settled_error_percent": 0.15218068168763774,
+        "worst_settled_error_percent": 0.19538602160795726,
+        "target_peak_g": 0.5,
+        "volts_peak_per_g": 0.018600587147402415
+      },
+      {
+        "frequency_hz": 112.24620483093732,
+        "seconds": 6.0,
+        "transient_peak_g": 0.5693387985229492,
+        "maximum_sine_equivalent_peak_g": 0.5254213357079798,
+        "status": "pass",
+        "settled_peak_g": 0.5000496163965344,
+        "settled_error_percent": 0.009923279306896701,
+        "worst_settled_error_percent": 0.029175304439932326,
+        "target_peak_g": 0.5,
+        "volts_peak_per_g": 0.017720120835128247
+      },
+      {
+        "frequency_hz": 118.92071150027213,
+        "seconds": 4.0,
+        "transient_peak_g": 0.566251277923584,
+        "maximum_sine_equivalent_peak_g": 0.5198852867778267,
+        "status": "pass",
+        "settled_peak_g": 0.5067093901522345,
+        "settled_error_percent": 1.341878030446897,
+        "worst_settled_error_percent": 3.941476709497005,
+        "target_peak_g": 0.5,
+        "volts_peak_per_g": 0.01704808238978689
+      },
+      {
+        "frequency_hz": 125.99210498948734,
+        "seconds": 4.0,
+        "transient_peak_g": 0.5545186996459961,
+        "maximum_sine_equivalent_peak_g": 0.5158569645398847,
+        "status": "pass",
+        "settled_peak_g": 0.5051788677703393,
+        "settled_error_percent": 1.0357735540678574,
+        "worst_settled_error_percent": 3.1496072554337173,
+        "target_peak_g": 0.5,
+        "volts_peak_per_g": 0.01653880317464173
+      },
+      {
+        "frequency_hz": 133.48398541700348,
+        "seconds": 4.0,
+        "transient_peak_g": 0.5560007095336914,
+        "maximum_sine_equivalent_peak_g": 0.5145673117850194,
+        "status": "pass",
+        "settled_peak_g": 0.5049149310620636,
+        "settled_error_percent": 0.9829862124127212,
+        "worst_settled_error_percent": 2.8909427325810144,
+        "target_peak_g": 0.5,
+        "volts_peak_per_g": 0.016074879786893866
+      },
+      {
+        "frequency_hz": 141.42135623730957,
+        "seconds": 4.0,
+        "transient_peak_g": 0.5514311790466309,
+        "maximum_sine_equivalent_peak_g": 0.512719134972916,
+        "status": "pass",
+        "settled_peak_g": 0.5042283013436255,
+        "settled_error_percent": 0.8456602687251088,
+        "worst_settled_error_percent": 2.4946734349772903,
+        "target_peak_g": 0.5,
+        "volts_peak_per_g": 0.01568539810100121
+      },
+      {
+        "frequency_hz": 149.83070768766822,
+        "seconds": 4.0,
+        "transient_peak_g": 0.5516781806945801,
+        "maximum_sine_equivalent_peak_g": 0.5106776408806835,
+        "status": "pass",
+        "settled_peak_g": 0.5034746406062228,
+        "settled_error_percent": 0.694928121244572,
+        "worst_settled_error_percent": 2.0691216485245523,
+        "target_peak_g": 0.5,
+        "volts_peak_per_g": 0.0153783106501652
+      },
+      {
+        "frequency_hz": 158.74010519682002,
+        "seconds": 4.0,
+        "transient_peak_g": 0.5557537078857422,
+        "maximum_sine_equivalent_peak_g": 0.5079811542132036,
+        "status": "pass",
+        "settled_peak_g": 0.5026111697434733,
+        "settled_error_percent": 0.5222339486946614,
+        "worst_settled_error_percent": 1.5582019785302936,
+        "target_peak_g": 0.5,
+        "volts_peak_per_g": 0.01514441848545372
+      },
+      {
+        "frequency_hz": 168.179283050743,
+        "seconds": 4.0,
+        "transient_peak_g": 0.5494551658630371,
+        "maximum_sine_equivalent_peak_g": 0.5055851464490163,
+        "status": "pass",
+        "settled_peak_g": 0.5015514025804548,
+        "settled_error_percent": 0.31028051609096235,
+        "worst_settled_error_percent": 1.0445669367828758,
+        "target_peak_g": 0.5,
+        "volts_peak_per_g": 0.014994951522939627
+      },
+      {
+        "frequency_hz": 178.17974362806797,
+        "seconds": 4.0,
+        "transient_peak_g": 0.544762134552002,
+        "maximum_sine_equivalent_peak_g": 0.5038219226945098,
+        "status": "pass",
+        "settled_peak_g": 0.5015047882826532,
+        "settled_error_percent": 0.30095765653064266,
+        "worst_settled_error_percent": 0.7419587405086414,
+        "target_peak_g": 0.5,
+        "volts_peak_per_g": 0.014877141009744563
+      },
+      {
+        "frequency_hz": 188.77486253633882,
+        "seconds": 4.0,
+        "transient_peak_g": 0.5458736419677734,
+        "maximum_sine_equivalent_peak_g": 0.502403979213458,
+        "status": "pass",
+        "settled_peak_g": 0.5007499433115093,
+        "settled_error_percent": 0.1499886623018624,
+        "worst_settled_error_percent": 0.4238934925933302,
+        "target_peak_g": 0.5,
+        "volts_peak_per_g": 0.01481588685799424
+      },
+      {
+        "frequency_hz": 200.00000000000014,
+        "seconds": 4.0,
+        "transient_peak_g": 0.6627054214477539,
+        "maximum_sine_equivalent_peak_g": 0.5076632501093027,
+        "status": "pass",
+        "settled_peak_g": 0.5028553257742016,
+        "settled_error_percent": 0.5710651548403112,
+        "worst_settled_error_percent": 1.509132836074767,
+        "target_peak_g": 0.5,
+        "volts_peak_per_g": 0.014589738828621069
+      },
+      {
+        "frequency_hz": 211.8926188718592,
+        "seconds": 4.0,
+        "transient_peak_g": 0.5427861213684082,
+        "maximum_sine_equivalent_peak_g": 0.5005439298785355,
+        "status": "pass",
+        "settled_peak_g": 0.49980526119213026,
+        "settled_error_percent": -0.038947761573937534,
+        "worst_settled_error_percent": 0.2213060310340964,
+        "target_peak_g": 0.5,
+        "volts_peak_per_g": 0.014625934154944361
+      },
+      {
+        "frequency_hz": 224.49240966187477,
+        "seconds": 4.0,
+        "transient_peak_g": 0.5406866073608398,
+        "maximum_sine_equivalent_peak_g": 0.4998673300301392,
+        "status": "pass",
+        "settled_peak_g": 0.49863629884421723,
+        "settled_error_percent": -0.2727402311565467,
+        "worst_settled_error_percent": 0.7018876149669784,
+        "target_peak_g": 0.5,
+        "volts_peak_per_g": 0.01473723672895368
+      },
+      {
+        "frequency_hz": 237.8414230005444,
+        "seconds": 4.0,
+        "transient_peak_g": 0.545379638671875,
+        "maximum_sine_equivalent_peak_g": 0.5003346052817041,
+        "status": "pass",
+        "settled_peak_g": 0.4991409254666375,
+        "settled_error_percent": -0.17181490667250351,
+        "worst_settled_error_percent": 0.5769545658820374,
+        "target_peak_g": 0.5,
+        "volts_peak_per_g": 0.014820962787145776
+      },
+      {
+        "frequency_hz": 251.98420997897486,
+        "seconds": 4.0,
+        "transient_peak_g": 0.6368937492370605,
+        "maximum_sine_equivalent_peak_g": 0.500342517720387,
+        "status": "pass",
+        "settled_peak_g": 0.4986969646660763,
+        "settled_error_percent": -0.260607066784746,
+        "worst_settled_error_percent": 0.8322335844763717,
+        "target_peak_g": 0.5,
+        "volts_peak_per_g": 0.014946196969057779
+      },
+      {
+        "frequency_hz": 266.96797083400713,
+        "seconds": 4.0,
+        "transient_peak_g": 0.5461206436157227,
+        "maximum_sine_equivalent_peak_g": 0.5003321146366095,
+        "status": "pass",
+        "settled_peak_g": 0.4978668182569037,
+        "settled_error_percent": -0.4266363486192544,
+        "worst_settled_error_percent": 1.3503032136829796,
+        "target_peak_g": 0.5,
+        "volts_peak_per_g": 0.015149156827310484
+      },
+      {
+        "frequency_hz": 282.8427124746193,
+        "seconds": 4.0,
+        "transient_peak_g": 0.5471086502075195,
+        "maximum_sine_equivalent_peak_g": 0.5068560582514029,
+        "status": "pass",
+        "settled_peak_g": 0.5025584341157118,
+        "settled_error_percent": 0.5116868231423396,
+        "worst_settled_error_percent": 1.3658475350681876,
+        "target_peak_g": 0.5,
+        "volts_peak_per_g": 0.014945522011742596
+      },
+      {
+        "frequency_hz": 299.6614153753366,
+        "seconds": 4.0,
+        "transient_peak_g": 0.5451326370239258,
+        "maximum_sine_equivalent_peak_g": 0.5003604232164781,
+        "status": "pass",
+        "settled_peak_g": 0.4975027842085966,
+        "settled_error_percent": -0.49944315828066577,
+        "worst_settled_error_percent": 1.5664648893886857,
+        "target_peak_g": 0.5,
+        "volts_peak_per_g": 0.01518907956915603
+      },
+      {
+        "frequency_hz": 317.4802103936402,
+        "seconds": 4.0,
+        "transient_peak_g": 0.5384635925292969,
+        "maximum_sine_equivalent_peak_g": 0.5003357874935069,
+        "status": "pass",
+        "settled_peak_g": 0.4977206061805782,
+        "settled_error_percent": -0.4558787638843616,
+        "worst_settled_error_percent": 1.428626922760845,
+        "target_peak_g": 0.5,
+        "volts_peak_per_g": 0.015410942828078865
+      },
+      {
+        "frequency_hz": 336.3585661014862,
+        "seconds": 4.0,
+        "transient_peak_g": 0.5398221015930176,
+        "maximum_sine_equivalent_peak_g": 0.5003621629802019,
+        "status": "pass",
+        "settled_peak_g": 0.4978406164370795,
+        "settled_error_percent": -0.43187671258408944,
+        "worst_settled_error_percent": 1.3908438202684392,
+        "target_peak_g": 0.5,
+        "volts_peak_per_g": 0.01562900155689091
+      },
+      {
+        "frequency_hz": 356.3594872561361,
+        "seconds": 4.0,
+        "transient_peak_g": 0.5405631065368652,
+        "maximum_sine_equivalent_peak_g": 0.5004125507217898,
+        "status": "pass",
+        "settled_peak_g": 0.4976425617323276,
+        "settled_error_percent": -0.47148765353447475,
+        "worst_settled_error_percent": 1.4935328820335436,
+        "target_peak_g": 0.5,
+        "volts_peak_per_g": 0.015866545867682474
+      },
+      {
+        "frequency_hz": 377.5497250726778,
+        "seconds": 4.0,
+        "transient_peak_g": 0.5999670028686523,
+        "maximum_sine_equivalent_peak_g": 0.5004692994902741,
+        "status": "pass",
+        "settled_peak_g": 0.4974340877483788,
+        "settled_error_percent": -0.5131824503242529,
+        "worst_settled_error_percent": 1.6431913432406797,
+        "target_peak_g": 0.5,
+        "volts_peak_per_g": 0.016131733357196854
+      },
+      {
+        "frequency_hz": 400.00000000000045,
+        "seconds": 4.0,
+        "transient_peak_g": 0.5378460884094238,
+        "maximum_sine_equivalent_peak_g": 0.500329184004255,
+        "status": "pass",
+        "settled_peak_g": 0.49698657938532836,
+        "settled_error_percent": -0.6026841229343235,
+        "worst_settled_error_percent": 1.8439465582366754,
+        "target_peak_g": 0.5,
+        "volts_peak_per_g": 0.016434812752591284
+      },
+      {
+        "frequency_hz": 423.7852377437186,
+        "seconds": 4.0,
+        "transient_peak_g": 0.5435271263122559,
+        "maximum_sine_equivalent_peak_g": 0.5004130582837302,
+        "status": "pass",
+        "settled_peak_g": 0.49658549215342224,
+        "settled_error_percent": -0.6829015693155563,
+        "worst_settled_error_percent": 2.157830546844264,
+        "target_peak_g": 0.5,
+        "volts_peak_per_g": 0.016799636624323343
+      },
+      {
+        "frequency_hz": 448.9848193237497,
+        "seconds": 4.0,
+        "transient_peak_g": 0.5338940620422363,
+        "maximum_sine_equivalent_peak_g": 0.5002105909020775,
+        "status": "pass",
+        "settled_peak_g": 0.4953957576015881,
+        "settled_error_percent": -0.9208484796823865,
+        "worst_settled_error_percent": 2.7799603884219426,
+        "target_peak_g": 0.5,
+        "volts_peak_per_g": 0.017282694715726216
+      },
+      {
+        "frequency_hz": 475.682846001089,
+        "seconds": 4.0,
+        "transient_peak_g": 0.5408101081848145,
+        "maximum_sine_equivalent_peak_g": 0.500497947446333,
+        "status": "pass",
+        "settled_peak_g": 0.49495402866649346,
+        "settled_error_percent": -1.0091942667013114,
+        "worst_settled_error_percent": 3.1329965142252725,
+        "target_peak_g": 0.5,
+        "volts_peak_per_g": 0.01784523564946455
+      },
+      {
+        "frequency_hz": 500.0,
+        "seconds": 4.0,
+        "transient_peak_g": 0.5413041114807129,
+        "maximum_sine_equivalent_peak_g": 0.5003958542655429,
+        "status": "pass",
+        "settled_peak_g": 0.4932834608283403,
+        "settled_error_percent": -1.3433078343319453,
+        "worst_settled_error_percent": 4.130682956495669,
+        "target_peak_g": 0.5,
+        "volts_peak_per_g": 0.018613856605176032
+      }
+    ],
+    "expected_frequency_count": 29,
+    "observed_step_count": 29,
+    "chart": {
+      "x_label": "Frequency (Hz)",
+      "y_label": "Fitted fundamental (g peak)",
+      "points": [
+        [
+          100.0,
+          0.5047777233957552,
+          0.5
+        ],
+        [
+          105.94630943592954,
+          0.5007609034084382,
+          0.5
+        ],
+        [
+          112.24620483093732,
+          0.5000496163965344,
+          0.5
+        ],
+        [
+          118.92071150027213,
+          0.5067093901522345,
+          0.5
+        ],
+        [
+          125.99210498948734,
+          0.5051788677703393,
+          0.5
+        ],
+        [
+          133.48398541700348,
+          0.5049149310620636,
+          0.5
+        ],
+        [
+          141.42135623730957,
+          0.5042283013436255,
+          0.5
+        ],
+        [
+          149.83070768766822,
+          0.5034746406062228,
+          0.5
+        ],
+        [
+          158.74010519682002,
+          0.5026111697434733,
+          0.5
+        ],
+        [
+          168.179283050743,
+          0.5015514025804548,
+          0.5
+        ],
+        [
+          178.17974362806797,
+          0.5015047882826532,
+          0.5
+        ],
+        [
+          188.77486253633882,
+          0.5007499433115093,
+          0.5
+        ],
+        [
+          200.00000000000014,
+          0.5028553257742016,
+          0.5
+        ],
+        [
+          211.8926188718592,
+          0.49980526119213026,
+          0.5
+        ],
+        [
+          224.49240966187477,
+          0.49863629884421723,
+          0.5
+        ],
+        [
+          237.8414230005444,
+          0.4991409254666375,
+          0.5
+        ],
+        [
+          251.98420997897486,
+          0.4986969646660763,
+          0.5
+        ],
+        [
+          266.96797083400713,
+          0.4978668182569037,
+          0.5
+        ],
+        [
+          282.8427124746193,
+          0.5025584341157118,
+          0.5
+        ],
+        [
+          299.6614153753366,
+          0.4975027842085966,
+          0.5
+        ],
+        [
+          317.4802103936402,
+          0.4977206061805782,
+          0.5
+        ],
+        [
+          336.3585661014862,
+          0.4978406164370795,
+          0.5
+        ],
+        [
+          356.3594872561361,
+          0.4976425617323276,
+          0.5
+        ],
+        [
+          377.5497250726778,
+          0.4974340877483788,
+          0.5
+        ],
+        [
+          400.00000000000045,
+          0.49698657938532836,
+          0.5
+        ],
+        [
+          423.7852377437186,
+          0.49658549215342224,
+          0.5
+        ],
+        [
+          448.9848193237497,
+          0.4953957576015881,
+          0.5
+        ],
+        [
+          475.682846001089,
+          0.49495402866649346,
+          0.5
+        ],
+        [
+          500.0,
+          0.4932834608283403,
+          0.5
+        ]
+      ]
+    },
+    "status": "pass",
+    "definition": "Tracking assessment against configured tolerance, separate from run completion. Sine uses the last settling-window blocks at each dwell; transient raw peaks are reported separately. Random excludes startup/ramp and the initial settling interval; all subsequent full-target blocks are evaluated."
+  },
+  "report_dir": ".",
+  "portable_copy_note": "Personal directory paths omitted; original setup ID retained. Raw recording hashes are in the parent validation manifest."
+}

@@ -24,6 +24,7 @@ from workspace_shell import (
     FloatingWorkspaceMixin, workspace_colors,
 )
 from run_reports import render_report_chart
+from channel_display import ChannelMailbox, peak_envelope
 
 
 COLORS = ['#287bb5', '#9264ad', '#298a6b', '#b97327', '#bd5673', '#577b85']
@@ -792,6 +793,9 @@ class ChannelView(QWidget):
             plot.addLegend(brush=pg.mkBrush(workspace_colors()['paper']))
             layout.addWidget(plot,1)
         self.is_streaming = False
+        self.display_timer = QTimer(self)
+        self.display_timer.setInterval(100)
+        self.display_timer.timeout.connect(self.refresh_display)
         self.configure_settings(settings)
 
     def configure_settings(self, settings):
@@ -802,6 +806,12 @@ class ChannelView(QWidget):
         self.samples = 0
         self.blocks = 0
         self.buffer = np.empty((self.num_channels, 0))
+        self.mailbox = ChannelMailbox(max(1, int(self.fs * 2)), self.num_channels)
+        self._display_dirty = True
+        self._control_psd = None
+        self._last_block = None
+        self._response_psd_dirty = False
+        self._last_response_blocks = 0
         self.psd_averaged = [None] * self.num_channels
         for plot in (self.time_plot,self.psd_plot):
             plot.clear()
@@ -812,9 +822,7 @@ class ChannelView(QWidget):
         self.time_curves, self.psd_curves = [], []
         for index, label in enumerate(self.channel_labels):
             color = COLORS[index % len(COLORS)]
-            curve = self.time_plot.plot(pen=pg.mkPen(color, width=1.5),name=label)
-            curve.setDownsampling(auto=True, method='peak')
-            curve.setClipToView(True)
+            curve = self.time_plot.plot(pen=pg.mkPen(color, width=1.5),name=label, antialias=False)
             self.time_curves.append(curve)
             self.psd_curves.append(self.psd_plot.plot(pen=pg.mkPen(color,width=1.5),name=label))
         self.target_curve = self.psd_plot.plot(pen=pg.mkPen(QApplication.palette().text().color(),style=Qt.DashLine),name='Control full target')
@@ -824,6 +832,7 @@ class ChannelView(QWidget):
             low = high/10
         self.psd_plot.setXRange(math.log10(low),math.log10(high),padding=.01)
         frequency_ticks(self.psd_plot,low,high)
+        self._filter_channels()
 
     def _filter_channels(self):
         selected = self.channel_combo.currentIndex() - 1
@@ -832,47 +841,100 @@ class ChannelView(QWidget):
             psd_curve.setVisible(selected < 0 or selected == index)
         if hasattr(self,'target_curve'):
             self.target_curve.setVisible(self.settings.test_mode == 'random' and selected in (-1,0))
+        self._display_dirty = True
+        self._response_psd_dirty = True
+        if self.isVisible():
+            self.refresh_display()
 
     def start_streaming(self):
         self.is_streaming = True
+        self.display_timer.start()
 
     def stop_streaming(self):
         self.is_streaming = False
+        self.display_timer.stop()
+        # Acquisition has stopped: flush final samples once, including hidden
+        # plots, so results remain available when the user opens Channels later.
+        self.refresh_display(force=True)
+
+    def queue_data_point(self, block):
+        # Producer entry point: no Qt widget access or drawing here.
+        if self.is_streaming:
+            self.mailbox.submit(block)
+
+    def queue_psd_data(self, packet):
+        if self.is_streaming:
+            self.mailbox.submit_psd(packet)
+
+    def refresh_display(self, force=False):
+        blocks, samples, count, dropped, psd, error = self.mailbox.drain()
+        if error:
+            self.info_label.setText(error)
+        if blocks:
+            self._ingest_blocks(blocks, samples, count, dropped)
+        if psd is not None:
+            self.update_psd_data(psd)
+        if not self._display_dirty or (not force and not self.isVisible()):
+            return
+        self._display_dirty = False
+        selected = self.channel_combo.currentIndex() - 1
+        times = (self.samples - self.buffer.shape[1] + np.arange(self.buffer.shape[1])) / self.fs
+        for index, curve in enumerate(self.time_curves):
+            if force or selected < 0 or selected == index:
+                x, y = peak_envelope(times, self.buffer[index])
+                curve.setData(x, y)
+        if self.samples:
+            self.time_plot.setXRange(max(0, self.samples/self.fs-2), self.samples/self.fs, padding=0)
+        if self._control_psd is not None:
+            frequencies, measured, target, averaged = self._control_psd
+            psd_values = averaged if averaged is not None else measured
+            mask = (frequencies > 0) & (psd_values > 0) & np.isfinite(psd_values)
+            if force or selected in (-1, 0):
+                self.psd_curves[0].setData(frequencies[mask], psd_values[mask])
+            if self.settings.test_mode == 'random' and target is not None:
+                set_curve(self.target_curve, frequencies, target)
+            else:
+                self.target_curve.clear()
+        if self._last_block is not None and (self._response_psd_dirty or force):
+            for index in range(1, self.num_channels):
+                if not force and selected not in (-1, index):
+                    continue
+                frequencies, psd_values = welch(self._last_block[index], fs=self.fs, nperseg=self.settings.welch_nperseg)
+                previous = self.psd_averaged[index]
+                alpha = 1. - math.exp(-self.settings.block_seconds / 2.)
+                psd_values = psd_values if previous is None else alpha*psd_values+(1-alpha)*previous
+                self.psd_averaged[index] = psd_values
+                mask = (frequencies > 0) & (psd_values > 0)
+                self.psd_curves[index].setData(frequencies[mask], psd_values[mask])
+            self._last_response_blocks = self.blocks
+            self._response_psd_dirty = False
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._display_dirty = True
+        self.refresh_display()
 
     def add_data_point(self, block):
         if not self.is_streaming:
             return
         block = np.atleast_2d(np.asarray(block))
-        if block.shape[0] != self.num_channels:
+        if block.ndim != 2 or block.shape[0] != self.num_channels:
             raise ValueError('Acquisition channel count does not match run settings')
-        self.samples += block.shape[1]
-        self.blocks += 1
+        self._ingest_blocks([block], block.shape[1], 1, False)
+
+    def _ingest_blocks(self, blocks, samples, count, dropped):
+        self.samples += samples
+        self.blocks += count
         capacity = max(1, int(self.fs * 2))
-        self.buffer = np.concatenate((self.buffer,block),axis=1)[:, -capacity:]
-        times = (self.samples - self.buffer.shape[1] + np.arange(self.buffer.shape[1])) / self.fs
-        for index, curve in enumerate(self.time_curves):
-            curve.setData(times,self.buffer[index])
-        self.time_plot.setXRange(max(0,self.samples/self.fs-2),self.samples/self.fs,padding=0)
-        if self.blocks == 1 or self.blocks % max(1,self.settings.realtime_psd_update_stride) == 0:
-            for index in range(1,self.num_channels):
-                frequencies, psd = welch(block[index],fs=self.fs,nperseg=self.settings.welch_nperseg)
-                previous = self.psd_averaged[index]
-                alpha = 1. - math.exp(-self.settings.block_seconds / 2.)
-                psd = psd if previous is None else alpha*psd+(1-alpha)*previous
-                self.psd_averaged[index] = psd
-                mask = (frequencies > 0) & (psd > 0)
-                self.psd_curves[index].setData(frequencies[mask],psd[mask])
+        previous = self.buffer[:, :0] if dropped else self.buffer
+        self.buffer = np.concatenate([previous, *blocks], axis=1)[:, -capacity:]
+        self._last_block = blocks[-1][:, -min(blocks[-1].shape[1], int(self.fs * self.settings.block_seconds)):]
+        self._display_dirty = True
+        self._response_psd_dirty |= self.blocks == count or self.blocks - self._last_response_blocks >= max(1, self.settings.realtime_psd_update_stride)
 
     def update_psd_data(self, packet):
-        frequencies, measured, target, averaged = packet
-        psd = averaged if averaged is not None else measured
-        mask = (frequencies > 0) & (psd > 0) & np.isfinite(psd)
-        self.psd_curves[0].setData(frequencies[mask],psd[mask])
-        if self.settings.test_mode == 'random' and target is not None:
-            set_curve(self.target_curve, frequencies,target)
-        else:
-            self.target_curve.clear()
-        self._filter_channels()
+        self._control_psd = packet
+        self._display_dirty = True
 
 
 class ResultsView(QWidget):
@@ -916,7 +978,9 @@ class ResultsView(QWidget):
         report = self.reports[index]
         backend = report['backend'] or f'{report["requested_backend"]} requested · not initialized'
         self.summary.setText(f'{report["outcome"].title()} · {backend} · {report["blocks"]} blocks · {report["duration_s"]:.1f} s · setup {report["config_id"]}')
-        settings = RunSettings.capture(report['settings'])
+        # A historical setup may violate newly introduced start-time checks.
+        # Display its captured values without re-validating them for a new run.
+        settings = RunSettings(report['settings'])
         metrics = report.get('latest_metrics') or {}
         measured = (f'{metrics["tone_peak_g"]:.4g} g peak fundamental' if 'tone_peak_g' in metrics else
                     f'{metrics["accel_peak_g"]:.4g} g peak estimate' if 'accel_peak_g' in metrics else
@@ -1096,10 +1160,9 @@ class WorkspaceWindow(FloatingWorkspaceMixin, QMainWindow):
         worker.state_changed.connect(self._worker_state)
         worker.status_message.connect(self._worker_notice)
         worker.psd_data_ready.connect(self.controller_tab.update_psd)
-        worker.psd_data_ready.connect(self.realtime_tab.update_psd_data)
+        worker.channel_mailbox = self.realtime_tab.mailbox
         worker.metrics_data_ready.connect(self.controller_tab.update_metrics)
         worker.eq_data_ready.connect(self.controller_tab.update_eq)
-        worker.realtime_data_ready.connect(self.realtime_tab.add_data_point)
         worker.report_ready.connect(self._worker_report)
         thread.finished.connect(self._thread_finished)
         self.run_state = 'starting'

@@ -507,6 +507,18 @@ class ControllerWorker(QThread):
         self.input_overload_supported = None
         self.assessment = RunAssessment(self.shared_config)
         self.report_files = None
+        self.channel_mailbox = None
+
+    def _publish_psd(self, packet):
+        if self.channel_mailbox is not None:
+            self.channel_mailbox.submit_psd(packet)
+        self.psd_data_ready.emit(packet)
+
+    def _publish_channel_block(self, data):
+        block = np.array(data, copy=True)
+        if self.channel_mailbox is not None:
+            self.channel_mailbox.submit(block)
+        self.realtime_data_ready.emit(block)
 
     def _exchange_block(self, writer, reader, command, simulation_mode, block_samples, timeout):
         """Associate AI with queued AO order, not the latest future command.
@@ -897,7 +909,7 @@ class ControllerWorker(QThread):
                 else:
                     self.psd_averaged = self.psd_alpha * Pxx + (1 - self.psd_alpha) * self.psd_averaged
                 
-                self.psd_data_ready.emit((f, Pxx, psd_target, self.psd_averaged))
+                self._publish_psd((f, Pxx, psd_target, self.psd_averaged))
                 
                 output_rms = applied.rms
                 self._publish_metrics({'accel_rms_g': float(a_rms_meas),
@@ -914,7 +926,7 @@ class ControllerWorker(QThread):
                 self.eq_data_ready.emit((eq_info['centers'], eq_info['gains']))
                 
                 # Emit current block for real-time visualization
-                self.realtime_data_ready.emit(np.array(data, copy=True))
+                self._publish_channel_block(data)
 
                 if data_logger:
                     self._timed_stream_call('record', data_logger.log_random_block,
@@ -939,6 +951,9 @@ class ControllerWorker(QThread):
                 if DaqError is not None and isinstance(e, DaqError) and getattr(e, 'error_code', None) == -200279:
                     self.error_message = ('Input buffer overflow: acquisition fell behind and samples were lost. '
                                           'The run is incomplete. See Results for stream timing diagnostics.\n\n' + str(e))
+                elif DaqError is not None and isinstance(e, DaqError) and getattr(e, 'error_code', None) == -200621:
+                    self.error_message = ('Output underflow (-200621): NI output ran out of buffered samples and the run stopped. '
+                                          'See Results for stream timing diagnostics.\n\n' + str(e))
                 self._announce('fault', self.error_message)
         finally:
             cleanup_errors = []
@@ -950,7 +965,9 @@ class ControllerWorker(QThread):
                     try:
                         operation()
                     except Exception as error:
-                        cleanup_errors.append(f'DAQ cleanup: {error}')
+                        detail = str(error)
+                        cleanup_errors.append('DAQ cleanup also reported the same driver fault.'
+                            if detail and detail in self.error_message else f'DAQ cleanup: {detail}')
             self.input_stream = None
             if self.report_files:
                 try:
@@ -1200,7 +1217,7 @@ class ControllerWorker(QThread):
                         self.psd_alpha * Pxx + (1 - self.psd_alpha) * self.psd_averaged
                     )
 
-                self.psd_data_ready.emit((f, Pxx, None, self.psd_averaged))
+                self._publish_psd((f, Pxx, None, self.psd_averaged))
                 output_rms = applied.rms
                 progress = (abs(math.log(applied_freq / start_hz) / math.log(end_hz / start_hz))
                             if applied_freq > 0 and start_hz != end_hz else 1.0 if applied_freq > 0 else 0.)
@@ -1216,7 +1233,7 @@ class ControllerWorker(QThread):
                     'output_rms_v': output_rms, 'output_peak_v': float(np.max(np.abs(applied.waveform))),
                     'output_cf': float(np.max(np.abs(applied.waveform)) / output_rms) if output_rms else 0.0,
                     'limiter_active': applied.limited})
-                self.realtime_data_ready.emit(np.array(data, copy=True))
+                self._publish_channel_block(data)
 
                 if data_logger:
                     self._timed_stream_call('record', data_logger.log_sine_block,

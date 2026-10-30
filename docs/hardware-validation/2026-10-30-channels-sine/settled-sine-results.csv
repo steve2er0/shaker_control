@@ -1,0 +1,2 @@
+frequency_hz,seconds,transient_peak_g,maximum_sine_equivalent_peak_g,status,settled_peak_g,settled_error_percent,worst_settled_error_percent,target_peak_g,volts_peak_per_g
+200.0,95.0,0.545997142791748,0.5055678569022533,pass,0.5001148000640038,0.022960012800754548,0.026754423269359506,0.5,0.014611982166888256

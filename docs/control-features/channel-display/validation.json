@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "source_base_commit": "976572522e99636d1a1d3dc80051188264aa9e82",
+  "source_state": "Uncommitted channel-display fix; hashes identify reviewed source.",
+  "source_sha256": {
+    "app.py": "a860ab7cfb6413a9929a1eef9a57f6708cae0b9484468b90b89d273e14daa18b",
+    "workspace_ui.py": "d76ecb7d14ffa4e1cd9edec198099a51d1e29428a9a64091e4c1f5d97d8b22d8",
+    "run_settings.py": "4ece37d6b9be608f0eed4afbc0812da02598d4ada6aaa959ab4f61b85afe737d",
+    "channel_display.py": "70f7cc5fe374404fa917383667010ac106671f39c49a597649a0633fee3c98e7",
+    "scripts/review_simulation_performance.py": "8de80502d0c414774367df807a86273a4b060b490ce9813f96c145e569cdf5fe"
+  },
+  "reported_fault": {
+    "code": -200621,
+    "description": "NI onboard output memory underflow",
+    "recording_directory": "20261029_224149_141922_1513fa_random_vibration"
+  },
+  "changes": [
+    "Bounded producer mailbox instead of queuing every raw block to GUI callbacks",
+    "100 ms GUI render timer and at most 4096 peak-preserving points per visible channel",
+    "Hidden channel plots do not redraw; raw acquisition and recording remain at full rate",
+    "Enabled measured-response limits are checked against the target before starting",
+    "Historical reports display captured values without applying new start-time rules"
+  ],
+  "software_tests": {
+    "command": "python -m pytest -q tests",
+    "passed": 224
+  },
+  "simulation_runtime": {
+    "method": "Qt event loop, live plots, default-rate simulation, real HDF5 recording",
+    "hardware_task_attempts": 0,
+    "cases": [
+      {
+        "mode": "random",
+        "fs_hz": 51200,
+        "block_samples": 51200,
+        "channels": 4,
+        "blocks": 12,
+        "first_block_wall_s": 0.2053062990307808,
+        "median_block_interval_s": 1.006641998887062,
+        "max_block_interval_s": 1.0234758034348488,
+        "median_mock_read_s": 0.01156340166926384,
+        "max_mock_read_s": 0.013045594096183777,
+        "max_gui_heartbeat_gap_s": 0.22824910283088684,
+        "stop_to_finished_s": 0.06442990154027939,
+        "outcome": "stopped",
+        "recording_checked": true,
+        "view": "channels",
+        "automatic_reports": false,
+        "maximum_time_curve_points": 4096
+      }
+    ],
+    "errors": []
+  },
+  "restored_user_setup": {
+    "mode": "random",
+    "target_rms_g": 3.159269594392042,
+    "measured_response_stops_enabled": false,
+    "output_started_on_reopen": false,
+    "note": "The captured user settings were preserved; limits were not raised automatically."
+  },
+  "scope": "The simulation timing check and subsequent amp-enabled 0.5 g hardware run passed. These bounded tests do not guarantee against every OS/USB scheduling fault.",
+  "exports": {
+    "four-channel-runtime.png": {
+      "bytes": 71066,
+      "sha256": "38a2ba7e7df9c4655fb1b518ceaacc54f033c8acf60e6309b5367e10512124c2"
+    }
+  },
+  "initial_hardware_recheck": {
+    "frequency_hz": 200,
+    "requested_peak_g": 0.5,
+    "view": "Channels",
+    "outcome": "fault",
+    "error": "Control sensor feedback was lost while output was driven.",
+    "blocks": 5,
+    "largest_command_peak_v": 0.001,
+    "stream_diagnostics": {
+      "ao_idle_output": "Zero volts requested from NI driver",
+      "input_buffer_samples_per_channel": 819200,
+      "output_buffer_samples_per_channel": 819200,
+      "priming_samples": 51200,
+      "regeneration_enabled": false,
+      "max_write_seconds": 0.00043880194425582886,
+      "last_input_backlog_samples": 0,
+      "max_input_backlog_samples": 797,
+      "max_read_seconds": 0.998741902410984,
+      "input_overload_detection": "NI input overload flag checked per block",
+      "max_record_seconds": 0.0026769042015075684,
+      "max_loop_seconds": 1.0121629014611244
+    },
+    "interpretation": "This earlier attempt had no measurable shaker response and stopped its 1 mV pilot. The later amp-enabled verification is recorded separately."
+  },
+  "latest_amp_enabled_verification": {
+    "reference": "../../hardware-validation/2026-10-30-channels-sine/validation.json",
+    "outcome": "complete",
+    "tracking_status": "pass",
+    "sample_seconds": 96,
+    "channels_visible_checks": 882,
+    "no_underflow": true
+  }
+}

@@ -131,6 +131,31 @@ engines. The controller and channel viewer use the same accepted sample rate and
 effective channel count. Applying settings or starting a new run clears live
 curves and histories; earlier reports remain in Results for the session.
 
+Channel display uses a bounded mailbox and a 100 ms render timer. Hidden channel
+plots do not redraw; visible time traces use at most 4,096 peak-preserving points
+per channel instead of painting every acquired sample. The full two-second sample
+buffer and raw recording retain the original values. Delayed GUI frames discard
+obsolete display work without changing acquisition, control, or recording data.
+Response-channel PSD previews are computed when displayed, with a final refresh
+after Stop. Historical reports remain readable even when newer setup checks would
+reject their settings for a new run.
+
+When measured-response stops are enabled, setup validation rejects a target above
+the configured RMS/peak limits. Switching from a low-level sine profile to a
+higher random target requires reviewing those limits or lowering the target;
+limits are not raised automatically.
+
+With the amplifier enabled, the updated Channels view was verified on the NI
+USB-4431 at **0.5 g-peak and 200 Hz** for 96 seconds. Channels was visible at all
+882 display checks, and time traces remained bounded to 4,096 points. The 85-second
+settled portion averaged **0.50011 g peak**, ranging from **0.49971 to 0.50299 g
+peak** (worst error 0.60%). There were no acquisition faults, underflows, output
+limiting, or protection trips. Maximum unread backlog was 805 samples (15.7 ms),
+and the largest observed GUI heartbeat interval was 183 ms. See the
+[hardware report](docs/hardware-validation/2026-10-30-channels-sine/test-report.html),
+[time-tracking chart](docs/hardware-validation/2026-10-30-channels-sine/time-tracking.png),
+and [verification summary](docs/hardware-validation/2026-10-30-channels-sine/validation.json).
+
 The browser lists the applied target, limits, calibration source, configured
 channels, sample clock, and completed session runs. Selecting a channel shows its
 time/PSD view and input settings; selecting a run shows that run's captured report.
@@ -236,6 +261,23 @@ These earlier sweeps used feedforward control; they do not validate the newly
 added feedback/protection/wizard features on hardware. That preset applies to
 this shaker/amplifier/fixture/sensor setup; other levels
 and frequencies were not validated by these sweeps.
+
+The updated closed-loop controller was subsequently tested on the same NI USB-4431
+setup at **0.5 g-peak, 100–500 Hz**, with only ai0 enabled at 10 mV/g and 2.1 mA
+IEPE. Both directions completed all 29 frequencies and passed the configured
+**±5% tolerance over each final three-block settling window**. The worst individual
+reading in those windows was 4.83% from target; the final block at each frequency
+was within 0.53%. The largest fitted-tone transition peak was 0.52962 g peak,
+and the largest absolute acquired sample was 0.66271 g. There were no acquisition
+faults, limiting blocks, or protection trips. The upward/downward runs recorded
+130/127 one-second blocks, with automatic reports and raw waveforms saved.
+See the [upward report](docs/hardware-validation/2026-10-29-sine-feedback/ascending/test-report.html),
+[downward report](docs/hardware-validation/2026-10-29-sine-feedback/descending/test-report.html),
+and [waveform verification and settings](docs/hardware-validation/2026-10-29-sine-feedback/validation.json).
+Response protections were enabled, and the driver accepted idle-zero output and
+input-overload checks. No deliberate protection trip was injected, and physical
+stop latency/output voltage and the calibration wizard were not validated by
+these normal sweeps.
 
 The calibration CLI iteratively adjusts voltage at each frequency to produce a
 target acceleration. For an explicit simulation example:

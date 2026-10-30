@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "client_task_date": "2026-10-30",
+  "source_base_commit": "976572522e99636d1a1d3dc80051188264aa9e82",
+  "source_state": "Working tree includes the channel-display fix.",
+  "source_sha256": {
+    "app.py": "a860ab7cfb6413a9929a1eef9a57f6708cae0b9484468b90b89d273e14daa18b",
+    "workspace_ui.py": "d76ecb7d14ffa4e1cd9edec198099a51d1e29428a9a64091e4c1f5d97d8b22d8",
+    "channel_display.py": "70f7cc5fe374404fa917383667010ac106671f39c49a597649a0633fee3c98e7",
+    "run_settings.py": "4ece37d6b9be608f0eed4afbc0812da02598d4ada6aaa959ab4f61b85afe737d"
+  },
+  "session_id": "7a0fa47a",
+  "started_at": "2026-10-30T09:44:49.422815-04:00",
+  "outcome": "complete",
+  "tracking_status": "pass",
+  "frequency_hz": 200,
+  "target_g_peak": 0.5,
+  "total_sample_seconds": 96.0,
+  "total_wall_seconds": 96.6059400960803,
+  "settled_hold": {
+    "first_block_index": 12,
+    "sample_seconds": 85.0,
+    "mean_g_peak": 0.5001100384825108,
+    "minimum_g_peak": 0.49971393596183833,
+    "maximum_g_peak": 0.5029947036449458,
+    "worst_error_percent": 0.5989407289891613
+  },
+  "whole_run_maximum_fitted_peak_g": 0.5053847574121744,
+  "whole_run_maximum_raw_sample_peak_g": 0.545997142791748,
+  "channel_display": {
+    "checks": 882,
+    "visible_checks": 882,
+    "largest_time_curve_points": 4096,
+    "max_heartbeat_gap_seconds": 0.18274850398302078
+  },
+  "stream_diagnostics": {
+    "ao_idle_output": "Zero volts requested from NI driver",
+    "input_buffer_samples_per_channel": 819200,
+    "output_buffer_samples_per_channel": 819200,
+    "priming_samples": 51200,
+    "regeneration_enabled": false,
+    "max_write_seconds": 0.010985001921653748,
+    "last_input_backlog_samples": 0,
+    "max_input_backlog_samples": 805,
+    "max_read_seconds": 0.9976653009653091,
+    "input_overload_detection": "NI input overload flag checked per block",
+    "max_record_seconds": 0.018977195024490356,
+    "max_loop_seconds": 1.0249800980091095
+  },
+  "protection_trip": null,
+  "recording_directory": "20261030_094449_848061_7b70db_sine_sweep",
+  "recording_files": {
+    "data.h5": {
+      "bytes": 39359056,
+      "sha256": "fe1e7d2448619fb82dcd6a39dae5241ccad7356ea22be420c9806c380b5a3eb3"
+    },
+    "settings.json": {
+      "bytes": 5195,
+      "sha256": "43d2d338dd619bf8e0ded1c791eca601f277bc101a4cccd66e0ba9c717686292"
+    },
+    "run-summary.json": {
+      "bytes": 9176,
+      "sha256": "323fc43057d346f9b59caf0044deef7cb8fe1dbfe1fb2c4d6d62e0377bfa64e8"
+    }
+  },
+  "scope": "One control input at 10 mV/g, 2.1 mA IEPE, this setup and 200 Hz only. Normal run with protections active; no deliberate fault injection or independent output-voltage measurement.",
+  "exports": {
+    "block-metrics.csv": {
+      "bytes": 22749,
+      "sha256": "dff044b75c0cc1a137d9ac43ffc9bfc8fbaf1bf14418438422c58a3fe35feb85"
+    },
+    "settled-sine-results.csv": {
+      "bytes": 313,
+      "sha256": "981ae067f195bd6e91ddc4e8831b03764b9f3ec748454d783a1b09057316bf59"
+    },
+    "test-report.html": {
+      "bytes": 1689,
+      "sha256": "a02cc9974aed1a7a2d754f07488336970e6b3f7f6435c90ec8477936911cab75"
+    },
+    "test-report.json": {
+      "bytes": 8994,
+      "sha256": "e8f1c1bc1e879775f9f28eeb60453725f4c5f0314d5a750896fa84941d404e38"
+    },
+    "time-tracking.png": {
+      "bytes": 64008,
+      "sha256": "1763f637ec3181f6d3a8a971b9e38988b2acbec2c54e776cbcbf6a7e8b31c485"
+    },
+    "tracking.png": {
+      "bytes": 28071,
+      "sha256": "d5bf0bab85910448d1834af877a65be38d0f17a36393d351b96e3db39482f707"
+    }
+  }
+}

@@ -29,6 +29,10 @@ def wait_until(predicate, timeout=6):
     deadline = time.monotonic() + timeout
     while not predicate() and time.monotonic() < deadline:
         QTest.qWait(20)
+        # qWait can retain the GIL while the event queue is quiet. Give Python
+        # acquisition workers an explicit turn instead of relying on plot work
+        # to release it as a side effect.
+        time.sleep(.005)
     assert predicate(), 'Timed out waiting for Qt workflow state'
 
 

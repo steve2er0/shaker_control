@@ -30,6 +30,9 @@ def main():
     parser.add_argument('--mode', choices=('random', 'sine_sweep', 'both'), default='both')
     parser.add_argument('--blocks', type=int, default=6)
     parser.add_argument('--check-budget', action='store_true', help='Require 1 s block cadence within 25%% and Stop cleanup within 0.5 s')
+    parser.add_argument('--view', choices=('response', 'channels'), default='response')
+    parser.add_argument('--noise', type=float, help='Explicit synthetic noise RMS for a reproducible review')
+    parser.add_argument('--no-reports', action='store_true', help='Exclude post-run automatic report rendering from Stop timing')
     parser.add_argument('--output', type=Path, default=ROOT / 'output/simulation-performance/gui')
     args = parser.parse_args()
     if args.blocks < 2:
@@ -112,6 +115,8 @@ def main():
                 'max_gui_heartbeat_gap_s': max(state['heartbeat_gaps'], default=0),
                 'stop_to_finished_s': time.perf_counter() - state['stop_requested'],
                 'outcome': report['outcome'], 'recording_checked': True,
+                'view': args.view, 'automatic_reports': report['settings']['report_enabled'],
+                'maximum_time_curve_points': max((len(c.xData) if c.xData is not None else 0 for c in window.realtime_tab.time_curves), default=0),
             }
             if args.check_budget:
                 assert .75 <= result['median_block_interval_s'] <= 1.25, result
@@ -144,6 +149,10 @@ def main():
         window.mode_combo.setCurrentIndex(1 if mode == 'sine_sweep' else 0)
         window.config_tab.fields['data_log_dir'].setText(str(args.output / 'recordings'))
         window.config_tab.fields['data_log_enabled'].setChecked(True)
+        if args.noise is not None:
+            window.config_tab.fields['sim_noise_level'].setValue(args.noise)
+        if args.no_reports:
+            window.config_tab.fields['report_enabled'].setChecked(False)
         if not window.config_tab.apply_config():
             errors.append(window.config_tab.validation_label.text())
             window.close()
@@ -154,6 +163,8 @@ def main():
             errors.append('Simulation start was rejected')
             window.close()
             return
+        if args.view == 'channels':
+            window.show_page(1)
         window.controller_worker.metrics_data_ready.connect(metrics)
         window.controller_worker.finished.connect(finish_case)
 

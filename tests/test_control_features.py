@@ -16,6 +16,7 @@ def captured(settings_data, **changes):
 @pytest.mark.parametrize('mode', ['random', 'sine_sweep'])
 def test_limits_cover_response_channels_and_negative_peaks(settings_data, mode):
     s = captured(settings_data, test_mode=mode, response_limits_enabled=True,
+                 target_psd_points=[(100, .00001), (500, .00001)], sine_g_level=.2,
                  response_max_peak_g=1, response_max_rms_g=.5, response_target_ratio=100)
     data = np.zeros((4, 800))
     data[2, 400] = -1.1

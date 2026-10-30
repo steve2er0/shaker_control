@@ -59,7 +59,7 @@ def test_nonconvergence_cannot_pass_or_produce_calibration(qt_app, settings_data
 
 def test_measured_trip_stops_worker_and_saves_triggering_samples(qt_app, settings_data, tmp_path, monkeypatch):
     settings = sine_settings(settings_data, data_log_enabled=True, data_log_dir=str(tmp_path),
-                             report_enabled=True, response_max_peak_g=.00001, response_max_rms_g=.000001)
+                             report_enabled=True, response_max_peak_g=.51, response_max_rms_g=.4)
     worker = app.ControllerWorker(settings)
     monkeypatch.setattr(worker, '_pace_block', lambda *args: None)
     reports = []
@@ -72,7 +72,7 @@ def test_measured_trip_stops_worker_and_saves_triggering_samples(qt_app, setting
     assert (directory / 'protection-trip-block.npz').is_file()
     assert json.loads((directory / 'test-report.json').read_text())['qualification']['status'] == 'fail'
     assert not worker.is_running
-    # Raw HDF5 is finalized even if the first acquired block trips protection.
+    # Raw HDF5 is finalized when protection interrupts acquisition.
     with h5py.File(directory / 'data.h5') as data:
         assert data['ai'].shape[0] == report['blocks']
 

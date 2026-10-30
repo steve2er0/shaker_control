@@ -1,0 +1,8 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Shaker test report</title>
+<style>body{font:16px system-ui;max-width:1100px;margin:40px auto;padding:0 20px;color:#24344b}table{border-collapse:collapse;width:100%}td,th{padding:8px;border:1px solid #ccd5df;text-align:left}img{width:100%}pre{white-space:pre-wrap}</style>
+<h1>Shaker test · PASS</h1><p>2026-10-30T09:44:49.422815-04:00 · Hardware · Setup 56c92ba2a867</p>
+<p>Run: complete · 96 blocks · 96.61 wall seconds · 96.00 sample seconds<br>Tracking tolerance: ±5%</p>
+<p></p><img src="tracking.png" alt="Measured tracking with tolerance band"><table><tr><th>Hz</th><th>Target g peak</th><th>Settled g peak</th><th>Error %</th><th>Raw transient peak g</th><th>Result</th></tr><tr><td>200</td><td>0.5</td><td>0.50011</td><td>+0.023</td><td>0.546</td><td>PASS</td></tr></table>
+<p>Tracking assessment against configured tolerance, separate from run completion. Sine uses the last settling-window blocks at each dwell; transient raw peaks are reported separately. Random excludes startup/ramp and the initial settling interval; all subsequent full-target blocks are evaluated.</p><p>Raw peak means the largest absolute acquired sample; it differs from fitted sine amplitude and RMS.</p>
+<p>Calibration: 2026-10-29 current shaker/amp/load; NI USB-4431 Dev1 ai0, 10 mV/g, 2.1 mA IEPE. Last-block tone fit at 0.5 g-peak nominal from 02b82812; revalidate after setup changes.<br>Input: Dev1/ai0: Acceleration input in g (2.1 mA IEPE)<br>Clocks: Independent AI/AO clocks configured</p>
+<p><a href="block-metrics.csv">Per-block measurements</a> · <a href="test-report.json">Full settings and assessment</a></p></html>
