@@ -227,6 +227,30 @@ class SineOscillator:
         return sin_block, cos_block
 
 
+class SineAmplitudeRamp:
+    """Join amplitude commands with a 20 ms raised-cosine envelope.
+
+    Oscillator phase continuity alone does not prevent a voltage step when
+    feedback changes amplitude at a nonzero phase. Keep the previous envelope
+    at the block boundary and reach the new command without a slope step.
+    """
+
+    def __init__(self, fs: float) -> None:
+        self.ramp_samples = max(2, int(round(float(fs) * .02)))
+        self.previous_peak = 0.0
+
+    def apply(self, unit_sine: np.ndarray, peak: float) -> np.ndarray:
+        peak = max(0.0, float(peak))
+        waveform = peak * unit_sine
+        count = min(len(waveform), self.ramp_samples)
+        if count and peak != self.previous_peak:
+            weight = .5 - .5 * np.cos(np.linspace(0.0, math.pi, count))
+            envelope = self.previous_peak + (peak - self.previous_peak) * weight
+            waveform[:count] = unit_sine[:count] * envelope
+        self.previous_peak = peak
+        return waveform
+
+
 def target_g_rms(g_level: float, level_is_rms: bool) -> float:
     """Convert configured g-level into RMS units for control."""
     g_level = float(g_level)

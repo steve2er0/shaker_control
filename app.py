@@ -55,6 +55,7 @@ from simulation import create_simulation_system
 from sine_sweep import (
     LogSweepStepper,
     SineOscillator,
+    SineAmplitudeRamp,
     build_drive_lookup,
     target_g_rms,
 )
@@ -1083,6 +1084,7 @@ class ControllerWorker(QThread):
             repeat=bool(self.shared_config.sine_repeat),
         )
         oscillator = SineOscillator(fs, stepper.current_frequency())
+        amplitude_ramp = SineAmplitudeRamp(fs)
         octaves_per_min = float(self.shared_config.sine_octaves_per_min)
         if abs(octaves_per_min) > 0.0:
             dwell_from_rate = 60.0 / (abs(octaves_per_min) * points_per_octave)
@@ -1145,7 +1147,7 @@ class ControllerWorker(QThread):
                 target_vpk = drive_vpk * target_peak_g_current
                 if closed_loop:
                     target_vpk = feedback.command(freq, drive_vpk, target_peak_g_current)
-                command_block = target_vpk * sin_block
+                command_block = amplitude_ramp.apply(sin_block, target_vpk)
 
                 command_block, limiter_stats = apply_safety_limiters(
                     command_block,
@@ -1227,6 +1229,7 @@ class ControllerWorker(QThread):
                     'feedback_ready': feedback.ready, 'settled': bool(settled),
                     'target_rms_g': target_peak_g_current / math.sqrt(2),
                     'frequency_hz': applied_freq, 'sweep_progress': min(1.0, progress),
+                    'step_minimum_remaining_s': max(0., dwell_remaining - block_duration),
                     'level_fraction': command_level, 'next_level_fraction': level_fraction,
                     'saturation_fraction': sat_frac, 'clipping_fraction': clipping_fraction,
                     'plant_gain_g_per_v': plant_gain,

@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "client_task_date": "2026-10-30",
+  "scope": "Software and native UI verification; no shaker acquisition after the target-stop and plot changes. Plot replays the previously recorded 0.5 g sweep. A 1 g hardware run has not been performed.",
+  "tests": {
+    "command": "python -m pytest -q tests",
+    "passed": 234,
+    "warnings": 10,
+    "exit_code": 0
+  },
+  "behavior": {
+    "target_stop_scaling": "Editing sine target or peak/RMS units scales both current absolute g stops by the target peak ratio; editable checkbox enables fixed stops instead. Apply captures the new limits; presets retain explicit saved thresholds. Running thresholds do not change.",
+    "example": {
+      "target_g_peak_before": 0.5,
+      "peak_stop_g_before": 0.85,
+      "rms_stop_g_before": 0.55,
+      "target_g_peak_after": 1,
+      "peak_stop_g_after": 1.7,
+      "rms_stop_g_after": 1.1,
+      "tracking_band_g_peak": [
+        0.95,
+        1.05
+      ],
+      "fixed_y_range_g_peak": [
+        0.9,
+        1.1
+      ]
+    },
+    "plot": "Shaded configured tolerance, 5% by default. Vertical autorange and pan/zoom disabled. Values outside the fixed scale remain in metrics/recordings and receive an above/below-range notice."
+  },
+  "checks": [
+    "Peak/RMS unit conversion without drift",
+    "Custom margin edits",
+    "Preset settings round-trip",
+    "Fixed absolute stop rejects a target above its limits",
+    "ResponseGuard uses the applied higher stop and still trips above it",
+    "Startup, large response and explicit autoRange preserve the fixed Y range",
+    "Native app reopened at 0.5 g, 0.85 g raw stop, 0.45\u20130.55 g plot range, 81 saved frequencies; output stopped"
+  ],
+  "recorded_plot_source": "20261030_100354_526925_413b28_sine_sweep",
+  "source_sha256": {
+    "workspace_ui.py": "a6372a43462bc1f1f8a6e98b372ba5007d90eb252489a63524035f66a2857fb5",
+    "control_features.py": "be15a766c11d33c49b050e4140a68f9d20c1a14be75f19247334246fc1feced0",
+    "tests/test_sine_target_view.py": "cbe1b4bd949b560daa981695c2ecf99a54f632e9cee3f92b8f30b632bc6e4c4f"
+  },
+  "exports": {
+    "response-bounds.png": {
+      "bytes": 74172,
+      "sha256": "bb52188b5cc9f98e84b3b74921e3fc2ac08908b4003d9617386ff133f99bc0ff"
+    }
+  }
+}

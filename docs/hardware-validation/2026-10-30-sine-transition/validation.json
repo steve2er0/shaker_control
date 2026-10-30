@@ -1,0 +1,66 @@
+{
+  "scope": "Initial read-only diagnosis of the hardware fault and numerical/GUI regression checks. The later successful 20-2000 Hz hardware verification is linked below.",
+  "recording": "20261030_095336_122196_597aed_sine_sweep",
+  "original_settings": {
+    "sine_start_hz": 20.0,
+    "sine_end_hz": 2000.0,
+    "sine_g_level": 0.5,
+    "sine_step_dwell": 90.0,
+    "sine_initial_settle": 5.0,
+    "sine_octaves_per_min": 2.5,
+    "sine_points_per_octave": 12.0,
+    "response_max_peak_g": 0.85
+  },
+  "finding": {
+    "first_frequency_seconds": 95,
+    "last_published_frequency_hz": 21.189261887185907,
+    "published_blocks": 98,
+    "fault": "Measured peak limit: Control Accel reached 0.94058 g (limit 0.85 g).",
+    "fault_block_tone_peak_g": 0.5012892847861199,
+    "fault_block_raw_peak_g": 0.940582275390625,
+    "fault_peak_seconds_into_block": 0.005234375,
+    "command_boundary_step_v": -0.00631381201369529,
+    "input_backlog_at_fault_seconds": 0.0
+  },
+  "interpretation": "A sharp amplitude reduction at nonzero phase preceded a brief response transient, consistent with excitation by the voltage discontinuity. The later sweep completed with smooth corrections; this supports the fix without independently proving the physical cause.",
+  "changes": {
+    "amplitude_transition": "20 ms raised-cosine envelope on sine command changes, retaining oscillator phase and response stops",
+    "live_status": "Remaining minimum dwell displayed separately from tracking settlement",
+    "user_selected_timing": {
+      "sine_octaves_per_min": 2.5,
+      "sine_points_per_octave": 12,
+      "sine_step_dwell": 0.5,
+      "minimum_rate_dwell_seconds": 2
+    }
+  },
+  "verification": {
+    "command": "python -m pytest -q tests",
+    "passed": 228,
+    "warnings": 10,
+    "exit_code": 0,
+    "hardware_tasks": "Forbidden by the test fixture",
+    "specific_regression": "20 to 21.189 Hz, two different plant gains, a queued acquisition block, and corrections at nonzero phase; completes without a boundary voltage step",
+    "app": "Reopened with corrected preset and previous reports; Ready, Stop disabled, no acquisition started"
+  },
+  "recorded_fault_hashes": {
+    "run-summary.json": "4fc3dd6def696ebe34b24c9efd9f38f1fe37e1c6ec70b6b9d3ec2a847a7035fc",
+    "protection-trip-block.npz": "513355692fda82bfde7b929d5ee0bb6b24454d8f9b2269ff331aed2ffefe51e4",
+    "block-metrics.csv": "c8238a28572a3dbbe19004135d603a56d1cee57b21f5aa0565f0d3dce0b0f853"
+  },
+  "source_hashes": {
+    "app.py": "ae284f44f4db88866cc37a60bf286826d81986dc59847ebba40b146a711a629c",
+    "sine_sweep.py": "d7239872ecd110979d3c588655af56057edda35c1f3d9b9ec219a2b3197acbfd",
+    "workspace_ui.py": "23c353d0c5fd9a9d925dd8d2a6c34c670f712d2c71b94caf3ef1f383a2f735bb",
+    "tests/test_sine_timing.py": "d3dd6b3c6cbf95bef5b2919f643ffe885d0ff82e7ba8fbd12f665fcc4fdaf8d0"
+  },
+  "limits": "The earlier 200 Hz hold and 100-500 Hz sweeps predate this correction. Follow-up verification of the corrected 20-2000 Hz sweep is recorded separately below.",
+  "follow_up_hardware_verification": {
+    "reference": "../2026-10-30-wide-sine/validation.json",
+    "outcome": "complete",
+    "tracking_status": "pass",
+    "frequencies": 81,
+    "sample_seconds": 407,
+    "maximum_raw_sample_peak_g": 0.6312127113342285,
+    "protection_trips": 0
+  }
+}

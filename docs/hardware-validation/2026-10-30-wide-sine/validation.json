@@ -1,0 +1,95 @@
+{
+  "schema_version": 1,
+  "client_task_date": "2026-10-30",
+  "source_base_commit": "fa943c729e48b60fa667f741d74bd94b2c775c7b",
+  "source_state": "Working tree includes the smooth sine amplitude correction and dwell display.",
+  "source_sha256": {
+    "app.py": "ae284f44f4db88866cc37a60bf286826d81986dc59847ebba40b146a711a629c",
+    "sine_sweep.py": "d7239872ecd110979d3c588655af56057edda35c1f3d9b9ec219a2b3197acbfd",
+    "control_features.py": "2c4ac15af0b8ec4acb2929179a98547f58763f07936132a95f7232f067778941",
+    "workspace_ui.py": "23c353d0c5fd9a9d925dd8d2a6c34c670f712d2c71b94caf3ef1f383a2f735bb",
+    "channel_display.py": "70f7cc5fe374404fa917383667010ac106671f39c49a597649a0633fee3c98e7",
+    "run_settings.py": "4ece37d6b9be608f0eed4afbc0812da02598d4ada6aaa959ab4f61b85afe737d"
+  },
+  "session_id": "a62602dc",
+  "started_at": "2026-10-30T10:03:54.329834-04:00",
+  "outcome": "complete",
+  "error": "",
+  "tracking_status": "pass",
+  "expected_frequency_count": 81,
+  "observed_frequency_count": 81,
+  "start_hz": 20.0,
+  "end_hz": 2000.0,
+  "target_g_peak": 0.5,
+  "requested_octaves_per_minute": 2.5,
+  "minimum_dwell_seconds": 0.5,
+  "points_per_octave": 12,
+  "total_sample_seconds": 407.0,
+  "total_wall_seconds": 407.3921873047948,
+  "worst_settled_window_error_percent": 4.430656210778583,
+  "worst_settled_mean_error_percent": 2.310464284704361,
+  "whole_run_maximum_fitted_peak_g": 0.5950263919676245,
+  "whole_run_maximum_raw_sample_peak_g": 0.6312127113342285,
+  "maximum_command_peak_v": 0.09070391134317438,
+  "independent_final_block_tone_fit_g_peak": 0.5025892305444009,
+  "channel_display": {
+    "checks": 3720,
+    "visible_checks": 2342,
+    "largest_time_curve_points": 4096,
+    "max_heartbeat_gap_seconds": 0.22683759778738022
+  },
+  "stream_diagnostics": {
+    "ao_idle_output": "Zero volts requested from NI driver",
+    "input_buffer_samples_per_channel": 819200,
+    "output_buffer_samples_per_channel": 819200,
+    "priming_samples": 51200,
+    "regeneration_enabled": false,
+    "max_write_seconds": 0.03135579824447632,
+    "last_input_backlog_samples": 0,
+    "max_input_backlog_samples": 845,
+    "max_read_seconds": 1.0031733959913254,
+    "input_overload_detection": "NI input overload flag checked per block",
+    "max_record_seconds": 0.010571800172328949,
+    "max_loop_seconds": 1.1316485032439232
+  },
+  "protection_trip": null,
+  "limiting_blocks": 0,
+  "recording_directory": "20261030_100354_526925_413b28_sine_sweep",
+  "recording_files": {
+    "data.h5": {
+      "bytes": 166794096,
+      "sha256": "3babb26044c002fdb48dde084855391daae813c90a63ad2752e46fdda5f87d87"
+    },
+    "settings.json": {
+      "bytes": 5182,
+      "sha256": "56354b2a8f4ea01077f861ff96fd34b33a3f7b98b30dba7d922f5c291a846be8"
+    },
+    "run-summary.json": {
+      "bytes": 54633,
+      "sha256": "1c4b433d8c6b8b8d5c6b4ede7191ae9da8d0c82467e00595be8cb7bd1d052c34"
+    }
+  },
+  "scope": "One NI USB-4431 control input ai0, 10 mV/g, 2.1 mA IEPE, this shaker/amplifier/fixture setup. Independent AI/AO clocks. Protections active, no deliberate fault injection or independent voltage measurement. Feedback settling extends the requested minimum-rate dwell.",
+  "exports": {
+    "block-metrics.csv": {
+      "bytes": 100925,
+      "sha256": "c5c5a8086b0fe8593bd1c41ad9406b601b2b78c489cd3136bd95bb8176e8d94a"
+    },
+    "settled-sine-results.csv": {
+      "bytes": 12108,
+      "sha256": "a16502789737d726db647aea1fb466e6d7efea7ae7bd2195741760973ff6ad9e"
+    },
+    "test-report.html": {
+      "bytes": 9335,
+      "sha256": "f4df5292cfb4a82e468da8ad6168c1fe096ddb500555a1a4d584888e681eaaa7"
+    },
+    "test-report.json": {
+      "bytes": 54457,
+      "sha256": "bbf3a079784a20b8ad06bf21c208d8b83c7b814d9446410a99cb008bd9a873de"
+    },
+    "tracking.png": {
+      "bytes": 66403,
+      "sha256": "13154e3f472a20ddf98af9cfce8eb4f899b5812fe6c54bbee2e46ddf45796068"
+    }
+  }
+}

@@ -127,6 +127,9 @@ class SettingsPanel(QWidget):
         self.sections['sine'][2].addRow('Amplitude unit', self.sine_unit_combo)
         self.sine_unit_combo.currentIndexChanged.connect(self._changed)
         self._edit_widgets.append(self.sine_unit_combo)
+        self.sine_stop_preview = QLabel()
+        self.sine_stop_preview.setWordWrap(True)
+        self.sections['sine'][2].addRow(self.sine_stop_preview)
         self._spin('sine_octaves_per_min', 'Sweep rate', 'sine', .01, 1000, ' octave/min', 3)
         self._spin('sine_initial_level', 'Ramp start', 'sine', 0, 100, ' %', 1)
         self._spin('sine_max_level_rate', 'Ramp rate limit', 'sine', 0, 500, ' %/s', 1)
@@ -144,6 +147,7 @@ class SettingsPanel(QWidget):
         self._spin('sine_drive_scale', 'Drive scale', 'drive', 0, 100, ' ×')
         self._spin('sine_points_per_octave', 'Frequency spacing', 'drive', 1, 100, ' points/octave')
         self._spin('sine_step_dwell', 'Minimum dwell', 'drive', .01, 60, ' s')
+        self._note('drive', 'Minimum dwell applies at every frequency. Long hold settings override the sweep rate; feedback settling can extend each step.')
         self._text('calibration_equipment', 'Shaker / fixture / load', 'drive')
         self._text('calibration_amp_setting', 'Amplifier setting', 'drive')
         self._text('calibration_sensor_id', 'Control sensor ID', 'drive')
@@ -189,6 +193,7 @@ class SettingsPanel(QWidget):
         self._spin('max_crest_factor', 'Crest-factor limit', 'limits', 1, 10, ' peak/RMS', 2)
         self._section('response', 'Measured-response protection', True)
         self._check('response_limits_enabled', 'Enable measured-response stops', 'response')
+        self._check('sine_scale_response_stops', 'Scale sine g stops when editing target', 'response')
         for key, label, maximum, unit, precision in (
             ('response_max_rms_g', 'All-input broadband RMS limit', 1000, ' g RMS', 3),
             ('response_max_peak_g', 'All-input raw peak limit', 10000, ' g peak', 3),
@@ -200,6 +205,7 @@ class SettingsPanel(QWidget):
             ('feedback_startup_seconds', 'Feedback startup allowance', 60, ' s', 3)):
             self._spin(key, label, 'response', 0 if key == 'feedback_startup_seconds' else .000001, maximum, unit, precision)
         self._note('response', 'Checks run on each acquired block. Response limits cover every enabled input; feedback loss uses the control input. Stop latency includes acquisition block time and driver cleanup.')
+        self._note('response', 'With sine stop scaling enabled, editing the target or amplitude unit scales both g stops by the same factor. Edit a stop to change its margin; disable scaling to keep absolute stops fixed. Apply setup before running.')
         self._section('control', 'Random ramp and PI tuning')
         self._spin('initial_level_fraction', 'Ramp start', 'control', 0, 200, ' %', 1)
         self._spin('max_level_fraction_rate', 'Ramp rate limit', 'control', 0, 200, ' %/s', 1)
@@ -357,6 +363,7 @@ class SettingsPanel(QWidget):
                 widget.setRange(min(widget.minimum(), value), max(widget.maximum(), value))
                 widget.setValue(value)
         self.sine_unit_combo.setCurrentIndex(1 if values['sine_g_level_is_rms'] else 0)
+        self._last_sine_peak = self._draft_sine_peak()
         low, high = values['calibration_min_hz'], values['calibration_max_hz']
         coverage = (f'Tested calibration: {low:g}–{high:g} Hz at {values["calibration_level_peak_g"]:g} g peak · {values["calibration_backend"]}'
                     if high > 0 else 'Calibration frequency/level coverage has not been recorded.')
@@ -370,10 +377,25 @@ class SettingsPanel(QWidget):
     def _changed(self, *args):
         if self._loading:
             return
+        peak = self._draft_sine_peak()
+        previous_peak = self._last_sine_peak
+        if (self.test_mode == 'sine_sweep' and previous_peak > 0 and peak != previous_peak
+                and self.fields['sine_scale_response_stops'].isChecked()):
+            for key in ('response_max_peak_g', 'response_max_rms_g'):
+                field = self.fields[key]
+                value = field.value() * peak / previous_peak
+                with QSignalBlocker(field):
+                    field.setDecimals(max(field.decimals(), 9))
+                    field.setMaximum(max(field.maximum(), value))
+                    field.setValue(value)
+        self._last_sine_peak = peak
         self.dirty = True
         self._update_sections()
         self._update_resolution()
         self.dirty_changed.emit(True)
+
+    def _draft_sine_peak(self):
+        return self.fields['sine_g_level'].value() * (math.sqrt(2) if self.sine_unit_combo.currentIndex() else 1)
 
     def _update_sections(self):
         sine = self.test_mode == 'sine_sweep'
@@ -394,6 +416,12 @@ class SettingsPanel(QWidget):
                 applicable = False
             wrapper.setVisible(applicable and key in selected)
         self.fields['sine_g_level'].setSuffix(' g RMS' if self.sine_unit_combo.currentIndex() else ' g peak')
+        stop_note = ('follows target edits' if self.fields['sine_scale_response_stops'].isChecked() else 'fixed stops')
+        if not self.fields['response_limits_enabled'].isChecked():
+            stop_note = 'stops disabled'
+        self.sine_stop_preview.setText(
+            f'Stops after Apply: raw peak {self.fields["response_max_peak_g"].value():.4g} g'
+            f' · RMS {self.fields["response_max_rms_g"].value():.4g} g · {stop_note}')
         accepted = self.shared_config.snapshot()
         self.context_summary.setText(f'Applied setup · {accepted.target_summary}')
 
@@ -593,6 +621,13 @@ class RunView(QWidget):
         self.sine_measured_curve = self.sine_plot.plot(pen=pg.mkPen(COLORS[0], width=2), symbol='o', symbolSize=5, symbolBrush=COLORS[0], name='Fundamental · latest at frequency')
         self.sine_target_curve = self.sine_plot.plot(pen=target_pen, name='Full target')
         self.sine_ramp_curve = self.sine_plot.plot(pen=ramp_pen, symbol='t', symbolSize=5, name='Ramp target')
+        bound_pen = pg.mkPen(COLORS[2], width=1, style=Qt.DashLine)
+        self.sine_lower_curve = self.sine_plot.plot(pen=bound_pen)
+        self.sine_upper_curve = self.sine_plot.plot(pen=bound_pen)
+        self.sine_tolerance_fill = pg.FillBetweenItem(self.sine_lower_curve, self.sine_upper_curve,
+            brush=pg.mkBrush(41, 138, 107, 32))
+        self.sine_tolerance_fill.setZValue(-10)
+        self.sine_plot.addItem(self.sine_tolerance_fill)
         layout.addWidget(self.plot_stack, 1)
         # Keep the legend outside the data area: a large low-frequency sine
         # response must not disappear behind the legend's opaque background.
@@ -613,6 +648,10 @@ class RunView(QWidget):
             self.legend_stack.addWidget(legend)
             plot.getPlotItem().legend.hide()
         layout.addWidget(self.legend_stack)
+        self.sine_range_label = QLabel()
+        self.sine_range_label.setObjectName('mutedText')
+        self.sine_range_label.setWordWrap(True)
+        layout.addWidget(self.sine_range_label)
         self.note_label = QLabel()
         self.note_label.setObjectName('mutedText')
         self.note_label.setWordWrap(True)
@@ -657,6 +696,7 @@ class RunView(QWidget):
         sine = settings.test_mode == 'sine_sweep'
         self.plot_stack.setCurrentIndex(1 if sine else 0)
         self.legend_stack.setCurrentIndex(1 if sine else 0)
+        self.sine_range_label.setVisible(sine)
         self.value_titles['accel'].setText('Fundamental · g peak' if sine else 'Control band · g RMS')
         self.value_titles['target'].setText('Full target · g peak' if sine else 'Full target · g RMS')
         self.value_titles['frequency'].parentWidget().setVisible(sine)
@@ -672,6 +712,24 @@ class RunView(QWidget):
                 self.band = [self.band[0] / 1.1, self.band[1] * 1.1]
             target = settings.target_rms_g * math.sqrt(2)
             self.sine_target_curve.setData(self.band, [target, target])
+            tolerance = settings.tracking_tolerance_percent / 100
+            lower, upper = target * (1-tolerance), target * (1+tolerance)
+            self.sine_lower_curve.setData(self.band, [lower, lower])
+            self.sine_upper_curve.setData(self.band, [upper, upper])
+            margin = max(target * .02, target * tolerance)
+            self.sine_y_range = (max(0., lower-margin), upper+margin)
+            low, high = self.sine_y_range
+            # Hold the scale through startup, overshoot, and user pan/zoom.
+            view = self.sine_plot.getViewBox()
+            view.setLimits(yMin=low, yMax=high, minYRange=high-low, maxYRange=high-low)
+            view.disableAutoRange(axis=pg.ViewBox.YAxis)
+            view.setMouseEnabled(y=False)
+            self.sine_plot.setYRange(low, high, padding=0)
+            self.sine_range_label.setText(
+                f'Green band ±{settings.tracking_tolerance_percent:g}%: {lower:.4g}–{upper:.4g} g peak'
+                f' · fixed Y {low:.4g}–{high:.4g} g peak'
+                f' · raw peak stop {settings.response_max_peak_g:.4g} g'
+                + ('' if settings.response_limits_enabled else ' (disabled)'))
             self.sine_plot.setXRange(math.log10(self.band[0]), math.log10(self.band[1]), padding=.03)
             frequency_ticks(self.sine_plot, *self.band)
             source = settings.calibration_source or 'Calibration source not recorded'
@@ -735,8 +793,14 @@ class RunView(QWidget):
             self.sine_measured_curve.setData(frequencies, [self.sine_points[f][0] for f in frequencies])
             self.sine_ramp_curve.setData(frequencies, [self.sine_points[f][1] for f in frequencies])
             self.detail_label.setText(f'Frequency progress {100 * metrics["sweep_progress"]:.1f}% · ' + self.detail_label.text())
+            if metrics.get('step_minimum_remaining_s', 0) > 0:
+                self.detail_label.setText(self.detail_label.text() +
+                    f' · minimum dwell remaining {metrics["step_minimum_remaining_s"]:.1f} s')
             if self.settings.sine_closed_loop:
                 self.detail_label.setText(self.detail_label.text() + (' · tracking settled' if metrics.get('settled') else ' · settling / identifying tone'))
+            if frequency > 0 and not self.sine_y_range[0] <= acceleration <= self.sine_y_range[1]:
+                self.detail_label.setText(self.detail_label.text() +
+                    (' · ABOVE fixed plot range' if acceleration > self.sine_y_range[1] else ' · BELOW fixed plot range'))
         elif self.latest_psd is not None:
             f, target = self.latest_psd
             set_curve(self.psd_ramp_curve, f, target * self._last_level ** 2 if target is not None else None, self.band)

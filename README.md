@@ -221,14 +221,50 @@ step has an additional initial settling dwell (3 seconds by default).
 Dwell rounds up to whole processing blocks. Hardware scheduling counts the
 blocks queued to AO and captures the final endpoint before completion; the
 initial zero priming block does not add a block to every frequency dwell.
+The minimum dwell applies at **every** frequency, including after changing a
+constant-frequency hold into a sweep. At 2.5 octaves/minute and 12 points/octave,
+the rate gives a two-second minimum per step when the configured minimum dwell
+is 0.5 seconds; feedback settling can extend it. The live status shows the
+remaining minimum dwell separately from tracking settlement.
+
+On October 30, the corrected amplitude transitions were tested on the NI USB-4431
+from **20–2000 Hz at 0.5 g-peak**, with one control accelerometer and measured-response
+stops enabled. All **81 frequencies passed** the configured ±5% settled-window
+check in 407 seconds; the worst settled-window reading was 4.43% from target.
+The largest fitted transient was 0.595 g-peak and the largest raw sample was
+0.631 g, below the 0.85 g peak stop. No faults or command limiting occurred.
+The requested 2.5 octaves/minute timing was extended by feedback settling.
+Channels was exercised during the run, with its displayed trace bounded to
+4096 points. See the [test report](docs/hardware-validation/2026-10-30-wide-sine/test-report.html),
+[settled tracking chart](docs/hardware-validation/2026-10-30-wide-sine/tracking.png),
+and [recording checks and measurements](docs/hardware-validation/2026-10-30-wide-sine/validation.json).
 
 New sessions enable **Enable sine amplitude feedback**. The table supplies a
 feedforward estimate in V peak per 1 g peak; a low pilot identifies measured
 gain before drive rises toward target. Gain updates use the confirmed applied
 command and a phase-independent fundamental fit. Unresolved or clipped feedback
 cannot accumulate correction. Upward voltage changes are bounded by the configured
-fraction per second and voltage limits. The ramp advances after tracking, and a
-frequency holds until the configured consecutive full-target blocks settle within
+fraction per second and voltage limits. A
+20 ms raised-cosine amplitude envelope joins successive voltage commands to
+avoid abrupt voltage steps when corrections occur away from a sine zero crossing.
+Measured peak protection still checks all samples, including transients.
+The setup editor enables **Scale sine g stops when editing target** by default.
+Changing the sine target or peak/RMS amplitude unit scales the current raw peak
+and broadband RMS stops by the same factor, preserving their existing margins.
+For example, a 0.5 g-peak target with a 0.85 g peak stop becomes a 1 g-peak target
+with a 1.70 g peak stop. Directly editing a stop changes its margin; disable
+scaling to retain fixed absolute stops. The target editor previews the resulting
+stops. Applying saves the new absolute thresholds in the run setup and presets;
+thresholds remain fixed throughout each run. Loading a preset preserves its
+saved thresholds.
+
+The sine response plot shades the configured tracking tolerance around the full
+target (±5% by default) and fixes its vertical range just beyond that band. At
+1 g peak and 5% tolerance, bounds are 0.95–1.05 g and the y-axis stays at
+0.90–1.10 g. Startup or outliers do not move the axis; the numeric readout and
+an above/below-range status retain responses outside the visible range.
+The level ramp advances after tracking, and each frequency holds until the
+configured consecutive full-target blocks settle within
 tolerance. Failure to settle before the deadline faults and stops the run.
 
 The live sine value/curve shows the fitted fundamental, with noise/harmonics

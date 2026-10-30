@@ -13,6 +13,7 @@ FEATURE_DEFAULTS = {
     'sine_closed_loop': True, 'sine_pilot_vpk': .001,
     'sine_correction_rate': .5, 'sine_settle_seconds': 1.,
     'sine_settle_blocks': 2, 'sine_max_step_seconds': 45.,
+    'sine_scale_response_stops': True,
     'tracking_tolerance_percent': 5., 'report_min_seconds': 10., 'report_settle_seconds': 2., 'report_enabled': True,
     'calibration_run': False, 'calibration_equipment': '', 'calibration_amp_setting': '',
     'calibration_sensor_id': '', 'calibration_min_hz': 0., 'calibration_max_hz': 0.,
